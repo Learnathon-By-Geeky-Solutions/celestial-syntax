@@ -32,7 +32,7 @@ This project aims to create a collaborative platform where students and teachers
 - Questions align with the difficulty level and user roles (student/teacher).
 
 ### 4. **Chat with Class Notes**
-- A chatbot feature enables users to query uploaded notes.
+- A chatbot feature enables users to query uploaded notes and slides from teacher.
 - AI language models provide context-relevant responses.
 
 ### 5. **AI-Based Matchmaking for Study Groups**
@@ -42,6 +42,7 @@ This project aims to create a collaborative platform where students and teachers
 ### 6. **APIs and Custom Models**
 - Integration with APIs (OpenAI, LangChain, etc.) for quiz generation, chatbot interaction, and note organization.
 - Support for custom models to enhance features like note summarization or content validation.
+- AI will generate questions based on previous year questions (eg. term final question).
 
 ## Technologies Used
 - **OCR Tools:** Google Cloud Vision, Tesseract
