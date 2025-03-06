@@ -8,50 +8,38 @@
 ## Mentor
 - shakil-shahan
 
-## Project Description
-# Collaborative Study Platform
+# 📌 Face Recognition-Based Attendance System
 
-## Overview
+## 📖 Project Description
+This project is a **Face Recognition-Based Attendance System** that automates attendance tracking using **OpenCV** and **Dlib**. It captures and compares individuals' images in real-time to mark attendance, stores the data in an **SQLite** database, and provides analytical insights such as **attendance percentage** and **student eligibility for exams**.
 
-This project aims to create a collaborative platform where students and teachers can manage and share study materials efficiently. The platform leverages AI to enhance the learning experience by organizing notes, generating quizzes, facilitating discussions, and creating opportunities for group study.
+### 🔹 Features:
+- 🎦 **Facial Recognition Attendance** - Uses OpenCV and Dlib to recognize faces and mark attendance.
+- 📚 **Course-Wise Tracking** - Attendance is stored and retrieved per course.
+- 📊 **Attendance Analysis** - Calculates total attendance and highlights students below the required threshold.
+- 📝 **Automated Reports** - Generates attendance summaries and exam eligibility lists.
+- 🌐 **Web-Based Interface** - Uses Flask to provide an interactive dashboard for attendance management.
 
-## Key Features
+---
 
-### 1. **Authentication & Role-Based Access Control**
-- Separate authentication systems for students and teachers.
-- Role-specific permissions:
-  - Teachers can approve, edit, or annotate uploaded notes.
-  - Students can upload and interact with approved content.
+## 🛠️ Technologies Used
+- **Python** 🐍 - Main Programming Language
+- **Flask** 🌎 - Web Framework for Backend
+- **OpenCV & Dlib** 🎭 - Face Detection & Recognition
+- **SQLite** 🗄️ - Database for Storing Attendance Records
+- **HTML, CSS, JavaScript** 🎨 - Frontend for Web Interface
+- **Bootstrap**  - Responsive UI Styling
 
-### 2. **Class Note Sharing**
-- Students can upload notes as PDFs or images.
-- OCR technology (e.g., Google Cloud Vision, Tesseract) is used to extract and organize text from uploaded files, making them searchable.
+---
 
-### 3. **AI-Driven Quiz Generation**
-- Quizzes are generated from class notes using AI tools like OpenAI, Gemini, or Hugging Face.
-- Questions align with the difficulty level and user roles (student/teacher).
-
-### 4. **Chat with Class Notes**
-- A chatbot feature enables users to query uploaded notes and slides from teacher.
-- AI language models provide context-relevant responses.
-
-### 5. **AI-Based Matchmaking for Study Groups**
-- AI algorithms dynamically match students with similar interests or challenges for collaborative study sessions.
-- Uses clustering or recommendation techniques for grouping.
-
-### 6. **APIs and Custom Models**
-- Integration with APIs (OpenAI, LangChain, etc.) for quiz generation, chatbot interaction, and note organization.
-- Support for custom models to enhance features like note summarization or content validation.
-- AI will generate questions based on previous year questions (eg. term final question).
-
-## Technologies Used
-- **OCR Tools:** Google Cloud Vision, Tesseract
-- **AI Frameworks:** OpenAI, Gemini, Hugging Face, LangChain
-- **Backend:** Custom APIs for data management and feature integration
-- **Frontend:** Intuitive UI for role-based interactions
+### ✅ Prerequisites
+Make sure you have **Python 3.8+** installed on your system.
 
 ## Getting Started
-1. Clone the repository
+1. Clone the repository:
+```bash
+git clone https://github.com/Learnathon-By-Geeky-Solutions/celestial-syntax/
+```
 2. Install dependencies
 3. Start development
 
