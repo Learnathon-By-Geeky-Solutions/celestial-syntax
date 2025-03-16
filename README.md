@@ -32,6 +32,10 @@ This project is a **Face Recognition-Based Attendance System** that automates at
 
 ---
 
+## Project Architecture
+Here is the ER diagram for our project:
+![ER Diagram](docs/ERD_Diagram.png)
+
 ### ✅ Prerequisites
 Make sure you have **Python 3.8+** installed on your system.
 
