@@ -36,6 +36,9 @@ This project is a **Face Recognition-Based Attendance System** that automates at
 Here is the ER diagram for our project:
 ![ER Diagram](docs/ERD_Diagram.png)
 
+## User flow diagram
+Here is the User Interface map of the app:
+![User Flow Diagram](docs/Userflow.png)
 ### ✅ Prerequisites
 Make sure you have **Python 3.8+** installed on your system.
 
