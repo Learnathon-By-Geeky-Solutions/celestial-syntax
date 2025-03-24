@@ -15,7 +15,8 @@ detector = dlib.get_frontal_face_detector()
 
 class Face_Register:
     def __init__(self):
-
+        self.input_roll = None  # Initialize in __init__
+        
         self.current_frame_faces_cnt = 0  #  cnt for counting faces in current frame
         self.existing_faces_cnt = 0  # cnt for counting saved faces
         self.ss_cnt = 0  #  cnt for screen shots
@@ -47,7 +48,7 @@ class Face_Register:
         self.font_step_title = tkFont.Font(family='Helvetica', size=15, weight='bold')
         self.font_warning = tkFont.Font(family='Helvetica', size=15, weight='bold')
 
-        self.path_photos_from_camera = "celestial-syntax/data/data_faces_from_camera/"
+        self.path_photos_from_camera = "data/data_faces_from_camera/"
         self.current_face_dir = ""
         self.font = cv2.FONT_ITALIC
 
@@ -87,8 +88,12 @@ class Face_Register:
         self.existing_faces_cnt = 0
         self.log_all["text"] = "Face images and `features_all.csv` removed!"
 
-    def GUI_get_input_name(self):
+    def GUI_get_input(self):
         self.input_name_char = self.input_name.get()
+        self.input_roll_char = self.input_roll.get()
+        if not self.input_name_char or not self.input_roll_char:
+            self.log_all["text"] = "Please enter both name and roll number!"
+            return
         self.create_face_folder()
         self.label_cnt_face_in_database['text'] = str(self.existing_faces_cnt)
 
@@ -117,26 +122,22 @@ class Face_Register:
                   text='Clear',
                   command=self.GUI_clear_data).grid(row=6, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
 
-        # Step 2: Input name and create folders for face
-        tk.Label(self.frame_right_info,
-                 font=self.font_step_title,
-                 text="Step 2: Input name").grid(row=7, column=0, columnspan=2, sticky=tk.W, padx=5, pady=20)
-
+    # Step 2: Input name and roll
         tk.Label(self.frame_right_info, text="Name: ").grid(row=8, column=0, sticky=tk.W, padx=5, pady=0)
         self.input_name.grid(row=8, column=1, sticky=tk.W, padx=0, pady=2)
+        tk.Label(self.frame_right_info, text="Roll: ").grid(row=9, column=0, sticky=tk.W, padx=5, pady=0)
+        self.input_roll = tk.Entry(self.frame_right_info)
+        self.input_roll.grid(row=9, column=1, sticky=tk.W, padx=0, pady=2)
+        tk.Button(self.frame_right_info, text='Input', command=self.GUI_get_input).grid(row=10, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
 
-        tk.Button(self.frame_right_info,
-                  text='Input',
-                  command=self.GUI_get_input_name).grid(row=8, column=2, padx=5)
-
-        # Step 3: Save current face in frame
+        # Step 3: Save current face in frame (MOVED TO ROW 11)
         tk.Label(self.frame_right_info,
-                 font=self.font_step_title,
-                 text="Step 3: Save face image").grid(row=9, column=0, columnspan=2, sticky=tk.W, padx=5, pady=20)
+                font=self.font_step_title,
+                text="Step 3: Save face image").grid(row=11, column=0, columnspan=2, sticky=tk.W, padx=5, pady=20)  # Changed to row 11
 
         tk.Button(self.frame_right_info,
-                  text='Save current face',
-                  command=self.save_current_face).grid(row=10, column=0, columnspan=3, sticky=tk.W)
+                text='Save current face',
+                command=self.save_current_face).grid(row=12, column=0, columnspan=3, sticky=tk.W)  # Changed to row 12
 
         # Show log in GUI
         self.log_all.grid(row=11, column=0, columnspan=20, sticky=tk.W, padx=5, pady=20)
@@ -153,18 +154,17 @@ class Face_Register:
 
     # Start from person_x+1
     def check_existing_faces_cnt(self):
-        if os.listdir("celestial-syntax/data/data_faces_from_camera/"):
-            # Get the order of latest person
-            person_list = os.listdir("celestial-syntax/data/data_faces_from_camera/")
-            person_num_list = []
-            for person in person_list:
-                person_order = person.split('_')[1].split('_')[0]
-                person_num_list.append(int(person_order))
-            self.existing_faces_cnt = max(person_num_list)
-
-        # Start from person_1
-        else:
-            self.existing_faces_cnt = 0
+        folders = os.listdir(self.path_photos_from_camera)
+        person_num_list = []
+        for folder in folders:
+            parts = folder.split('_')
+            if len(parts) >= 2 and parts[0] == 'person':
+                try:
+                    person_num = int(parts[1])
+                    person_num_list.append(person_num)
+                except ValueError:
+                    continue
+        self.existing_faces_cnt = max(person_num_list) if person_num_list else 0
 
     # Update FPS of Video stream
     def update_fps(self):
@@ -180,21 +180,14 @@ class Face_Register:
         self.label_fps_info["text"] = str(self.fps.__round__(2))
 
     def create_face_folder(self):
-        #  Create the folders for saving faces
-        self.existing_faces_cnt += 1
-        if self.input_name_char:
-            self.current_face_dir = self.path_photos_from_camera + \
-                                    "person_" + str(self.existing_faces_cnt) + "_" + \
-                                    self.input_name_char
-        else:
-            self.current_face_dir = self.path_photos_from_camera + \
-                                    "person_" + str(self.existing_faces_cnt)
+        self.check_existing_faces_cnt()
+        self.existing_faces_cnt += 1  # Increment for new person
+        folder_name = f"person_{self.existing_faces_cnt}_roll_{self.input_roll_char}_name_{self.input_name_char}"
+        self.current_face_dir = os.path.join(self.path_photos_from_camera, folder_name)
         os.makedirs(self.current_face_dir)
-        self.log_all["text"] = "\"" + self.current_face_dir + "/\" created!"
-        logging.info("\n%-40s %s", "Create folders:", self.current_face_dir)
-
-        self.ss_cnt = 0  #  Clear the cnt of screen shots
-        self.face_folder_created_flag = True  # Face folder already created
+        self.log_all["text"] = f"Folder \"{folder_name}\" created!"
+        self.ss_cnt = 0
+        self.face_folder_created_flag = True
 
     def save_current_face(self):
         if self.face_folder_created_flag:
