@@ -1,0 +1,58 @@
+/* The HTML markup has been removed. Add pure CSS rules here if necessary. */
+    
+
+    body {
+        font-family: 'Segoe UI', system-ui;
+        background: var(--light-bg);
+        min-height: 100vh;
+    }
+
+    .navbar {
+        background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+        box-shadow: 0 2px 15px rgba(0,0,0,0.1);
+    }
+
+    .card {
+        border: none;
+        border-radius: 15px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        transition: transform 0.3s ease;
+    }
+
+    .card:hover {
+        transform: translateY(-5px);
+    }
+
+    .btn-primary {
+        background-color: var(--primary-color);
+        border: none;
+        padding: 12px 25px;
+        border-radius: 8px;
+        opacity: 1; /* Ensure the button is fully visible */
+        transition: background-color 0.3s ease;
+    }
+    
+
+    .btn-primary:hover {
+        background-color: var(--secondary-color);
+    }
+
+    .table-hover tbody tr:hover {
+        background-color: rgba(75, 134, 180, 0.05);
+    }
+
+    .status-badge {
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-weight: 500;
+    }
+
+    .present {
+        background: #e8f5e9;
+        color: #2e7d32;
+    }
+
+    .absent {
+        background: #ffebee;
+        color: #c62828;
+    }
