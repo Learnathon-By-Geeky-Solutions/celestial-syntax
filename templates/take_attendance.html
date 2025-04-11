@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Take Attendance - Smart Attendance{% endblock %}
+
+{% block content %}
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="mb-0"><i class="fas fa-camera me-2"></i>Facial Recognition Setup</h3>
+                </div>
+                <div class="card-body text-center">
+                    <div class="mb-4">
+                        <i class="fas fa-video fa-4x text-primary mb-3"></i>
+                        <h4>Select Course for Attendance</h4>
+                    </div>
+                    <form action="/take_attendance" method="POST">
+                        <select name="course_id" class="form-select form-select-lg mb-4">
+                            {% for course in courses %}
+                            <option value="{{ course[0] }}">{{ course[1] }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="btn btn-primary btn-lg w-100">
+                            <i class="fas fa-play-circle me-2"></i>Start Recognition
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
