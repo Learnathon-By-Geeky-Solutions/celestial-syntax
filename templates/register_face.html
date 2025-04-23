@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}Register Face{% endblock %}
+{% block content %}
+<div class="container py-5">
+    <div class="card">
+        <div class="card-header bg-primary text-white">
+            <h3 class="mb-0"><i class="fas fa-user-plus me-2"></i>Register Face</h3>
+        </div>
+        <div class="card-body">
+            <form id="face-registration-form" onsubmit="return false;"> <div class="row g-3">
+                    <div class="col-md-6">
+                        <label for="name" class="form-label">Name</label>
+                        <input type="text" class="form-control" id="name" name="name" required>
+                    </div>
+                    <div class="col-md-6">
+                        <label for="roll_number" class="form-label">Roll Number</label>
+                        <input type="text" class="form-control" id="roll_number" name="roll_number" required>
+                    </div>
+                    <div class="col-12 text-center mt-3">
+                         <button type="button" class="btn btn-info w-100" id="create-folder-btn">
+                            <i class="fas fa-folder-plus me-2"></i>Create/Select Folder
+                        </button>
+                    </div>
+                    <div class="col-12 text-center mt-3">
+                        <video id="camera-feed" autoplay playsinline style="width: 100%; max-width: 640px; border: 1px solid #ccc; background-color: #eee;"></video>
+                        <canvas id="capture-canvas" style="display: none;"></canvas>
+                    </div>
+                    <div class="col-12 text-center mt-2">
+                         <button type="button" class="btn btn-primary w-100" id="capture-btn" disabled> <i class="fas fa-camera me-2"></i>Capture & Save Image Instantly
+                        </button>
+                         <small id="image-count-display" class="form-text text-muted">Images captured: 0</small>
+                    </div>
+                    <div class="col-12 text-center mt-3">
+                        <button type="button" class="btn btn-success w-100" id="save-details-btn" disabled> <i class="fas fa-save me-2"></i>Finalize Registration (Run Feature Extraction)
+                        </button>
+                    </div>
+                     <div class="col-12 mt-3">
+                        <div id="status-message" class="alert" role="alert" style="display: none;"></div>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const video = document.getElementById('camera-feed');
+    const canvas = document.getElementById('capture-canvas');
+    const captureBtn = document.getElementById('capture-btn');
+    const saveDetailsBtn = document.getElementById('save-details-btn');
+    const createFolderBtn = document.getElementById('create-folder-btn');
+    const nameInput = document.getElementById('name');
+    const rollInput = document.getElementById('roll_number');
+    const statusMessageDiv = document.getElementById('status-message');
+    const imageCountDisplay = document.getElementById('image-count-display');
+    let imageCaptureCount = 0;
+
+    // Function to show status messages
+    function showStatus(message, type = 'info') { // types: success, danger, warning, info
+        statusMessageDiv.textContent = message;
+        statusMessageDiv.className = `alert alert-${type}`;
+        statusMessageDiv.style.display = 'block';
+    }
+
+    // Access camera
+    navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => {
+            video.srcObject = stream; // [cite: 805]
+            video.play(); // Ensure video plays
+        })
+        .catch(err => {
+            showStatus(`Unable to access camera: ${err.message}`, 'danger'); // [cite: 805]
+            console.error("Camera access error:", err); // [cite: 805]
+        });
+
+    // Create Folder Button Logic
+    createFolderBtn.addEventListener('click', async () => {
+        const name = nameInput.value.trim();
+        const roll_number = rollInput.value.trim();
+
+        if (!name || !roll_number) {
+            showStatus("Please enter both Name and Roll Number before creating a folder.", 'warning');
+            return;
+        }
+
+        showStatus("Creating folder...", 'info');
+        try {
+            const response = await fetch('/create_folder', { // [cite: 807]
+                method: 'POST',
+                body: JSON.stringify({ name, roll_number }), // [cite: 807]
+                headers: { 'Content-Type': 'application/json' } // [cite: 807]
+            });
+            const result = await response.json(); // [cite: 807]
+
+            if (result.status === 'success') {
+                showStatus(result.message, 'success'); // [cite: 808]
+                captureBtn.disabled = false; // Enable capture button
+                saveDetailsBtn.disabled = true; // Disable save until images are captured
+                imageCaptureCount = 0; // Reset count when new folder is created
+                imageCountDisplay.textContent = `Images captured: ${imageCaptureCount}`;
+            } else {
+                showStatus(`Folder creation failed: ${result.message}`, 'danger'); // [cite: 808]
+                captureBtn.disabled = true;
+                saveDetailsBtn.disabled = true;
+            }
+        } catch (error) {
+            showStatus(`Folder creation request failed: ${error}`, 'danger'); // [cite: 809]
+            console.error("Create folder error:", error); // [cite: 809]
+            captureBtn.disabled = true;
+            saveDetailsBtn.disabled = true;
+        }
+    });
+
+    // Capture Image Button Logic (Instant Save)
+    captureBtn.addEventListener('click', async () => {
+        // Check if video stream is active
+         if (!video.srcObject || !video.srcObject.active) {
+            showStatus("Camera feed not active. Please allow camera access.", 'danger');
+            return;
+        }
+         // Ensure video dimensions are available
+        if (video.videoWidth === 0 || video.videoHeight === 0) {
+            showStatus("Video feed not ready. Please wait a moment.", 'warning');
+            return;
+        }
+
+
+        const context = canvas.getContext('2d');
+        canvas.width = video.videoWidth; // [cite: 810]
+        canvas.height = video.videoHeight; // [cite: 810]
+        context.drawImage(video, 0, 0, canvas.width, canvas.height); // [cite: 810]
+        const capturedImage = canvas.toDataURL('image/jpeg'); // [cite: 811]
+
+        showStatus("Saving captured image...", 'info');
+        try {
+            // Prepare form data for sending
+             const formData = new FormData();
+             formData.append('image_data', capturedImage);
+
+            const response = await fetch('/capture_image', { // [cite: 811]
+                method: 'POST',
+                // Send as form data, not JSON, matching Flask backend
+                body: new URLSearchParams(formData) // [cite: 812]
+            });
+            const result = await response.json(); // [cite: 812]
+
+            if (result.status === 'success') {
+                imageCaptureCount++;
+                imageCountDisplay.textContent = `Images captured: ${imageCaptureCount}`;
+                showStatus(result.message, 'success'); // [cite: 812]
+                saveDetailsBtn.disabled = false; // Enable finalize button after at least one image is saved
+            } else {
+                showStatus(`Image save failed: ${result.message}`, 'danger'); // [cite: 812]
+            }
+        } catch (error) {
+            showStatus(`Image save request failed: ${error}`, 'danger'); // [cite: 813]
+            console.error("Capture image error:", error); // [cite: 813]
+        }
+    });
+
+    // Save Details Button Logic (Finalize Registration)
+    saveDetailsBtn.addEventListener('click', async () => {
+         if (imageCaptureCount === 0) {
+            showStatus("Please capture at least one image before finalizing.", 'warning');
+            return;
+        }
+
+        showStatus("Finalizing registration and running feature extraction...", 'info');
+        try {
+            // This endpoint now only triggers the subprocess
+            const response = await fetch('/finalize_registration', { method: 'POST' }); // [cite: 814]
+            const result = await response.json(); // [cite: 814]
+
+            if (result.status === 'success') {
+                showStatus(result.message, 'success'); // [cite: 814]
+                 // Optionally redirect or reset form after success
+                alert("Registration complete! Redirecting to dashboard."); // Simple alert
+                // Reset buttons and counts
+                 captureBtn.disabled = true;
+                 saveDetailsBtn.disabled = true;
+                 imageCaptureCount = 0;
+                 imageCountDisplay.textContent = `Images captured: ${imageCaptureCount}`;
+                 nameInput.value = ''; // Clear inputs
+                 rollInput.value = '';
+                // window.location.href = '/'; // Redirect to dashboard
+            } else {
+                 showStatus(`Finalization failed: ${result.message}`, 'danger'); // [cite: 814]
+            }
+
+        } catch (error) {
+            showStatus(`Finalization request failed: ${error}`, 'danger'); // [cite: 815]
+            console.error("Save details error:", error); // [cite: 815]
+        }
+    });
+});
+</script>
+{% endblock %}
