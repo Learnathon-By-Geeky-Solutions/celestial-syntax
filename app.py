@@ -417,37 +417,46 @@ def reports():
     conn = get_db()
     cursor = conn.cursor()
 
-    # Get selected semester from query parameters, default to 'all'
+    # Get selected semester and course from query parameters
     selected_semester = request.args.get('semester', 'all')
+    selected_course_id = request.args.get('course_id', 'all') # Get selected course ID
+
+    # --- FIX: Initialize selected_course_name ---
+    # This ensures the variable exists in the local scope even if no specific course is selected
+    selected_course_name = None # Or maybe "All Courses" if you prefer that default display
+
+    # Fetch list of all courses for the course dropdown
+    cursor.execute("SELECT id, name FROM courses ORDER BY name") # Added ORDER BY
+    all_courses = cursor.fetchall() # Fetch all courses
+
 
     # Determine date range based on selected semester
     start_date = None
     end_date = None
     date_filter_sql = ""
-    query_params = []
+    semester_query_params = [] # Use a separate variable for semester params
 
     if selected_semester != 'all' and selected_semester in SEMESTER_DATES:
         start_date, end_date = SEMESTER_DATES[selected_semester]
         date_filter_sql = " WHERE a.date BETWEEN ? AND ? "
-        query_params = [start_date, end_date]
+        semester_query_params = [start_date, end_date]
         print(f"Filtering reports for semester {selected_semester}: {start_date} to {end_date}") # Debugging
     else:
         selected_semester = 'all' # Ensure 'all' is set if invalid semester is passed
         print("Showing reports for all time.") # Debugging
-        # For 'all time', we don't add a date WHERE clause initially
+        # For 'all time', date_filter_sql remains empty and semester_query_params is empty
 
     try:
-        # --- Build queries with optional date filtering ---
-
-        # 1. Overall Attendance Percentage
+        # --- Build queries with optional date filtering (for overall and trend) ---
+        # These only filter by semester/time, not course
         overall_sql = f"SELECT SUM(present), COUNT(*) FROM attendance a {date_filter_sql.replace(' WHERE', 'WHERE') if date_filter_sql else ''}"
-        cursor.execute(overall_sql, query_params)
+        cursor.execute(overall_sql, semester_query_params) # Use semester_query_params
         overall_res = cursor.fetchone()
         overall_present = overall_res[0] if overall_res and overall_res[0] is not None else 0
         overall_total = overall_res[1] if overall_res and overall_res[1] is not None else 0
         overall_percentage = (overall_present / overall_total) * 100 if overall_total > 0 else 0
 
-        # 2. Attendance Percentage Per Course
+        # Attendance Percentage Per Course (This also only filters by semester/time)
         course_sql = f"""
             SELECT
                 c.name,
@@ -459,7 +468,7 @@ def reports():
             GROUP BY c.name
             ORDER BY c.name
         """
-        cursor.execute(course_sql, query_params)
+        cursor.execute(course_sql, semester_query_params) # Use semester_query_params
         course_stats_raw = cursor.fetchall()
         course_stats = []
         for row in course_stats_raw:
@@ -473,7 +482,7 @@ def reports():
                 'total': total_records
             })
 
-        # 3. Attendance Trend Over Time (by Month)
+        # Attendance Trend Over Time (by Month) - Filters by semester/time
         trend_sql = f"""
             SELECT
                 strftime('%Y-%m', date) AS month,
@@ -484,7 +493,7 @@ def reports():
             GROUP BY month
             ORDER BY month
         """
-        cursor.execute(trend_sql, query_params)
+        cursor.execute(trend_sql, semester_query_params) # Use semester_query_params
         trend_raw = cursor.fetchall()
         attendance_trend = {
             'labels': [row['month'] for row in trend_raw],
@@ -499,9 +508,47 @@ def reports():
              attendance_trend['percentages'].append(round(percentage, 2))
 
 
-        # 4. Students with Low Attendance (within the selected period or overall)
-        low_threshold = 50 # Example threshold percentage
-        # We need total classes and present count *within the period* for each student
+        # --- Query for Students with Low Attendance (filters by semester AND optionally course) ---
+        low_threshold = 60 # Example threshold percentage
+
+        low_attendance_where_clauses = []
+        low_attendance_query_params = []
+
+        # Add semester filter clauses if selected
+        if selected_semester != 'all' and selected_semester in SEMESTER_DATES:
+             low_attendance_where_clauses.append("a.date BETWEEN ? AND ?")
+             low_attendance_query_params.extend([start_date, end_date])
+
+        # Add course filter clause if selected
+        if selected_course_id != 'all':
+             try:
+                 # Validate course_id is an integer if not 'all'
+                 course_id_int = int(selected_course_id)
+                 low_attendance_where_clauses.append("a.course_id = ?")
+                 low_attendance_query_params.append(course_id_int)
+                 # Fetch the name of the selected course for display
+                 cursor.execute("SELECT name FROM courses WHERE id = ?", (course_id_int,))
+                 course_name_res = cursor.fetchone() # Use a different variable name
+                 if course_name_res:
+                      selected_course_name = course_name_res['name'] # Assign to the initialized variable
+                 else:
+                      # Handle case where invalid course_id was passed
+                      selected_course_id = 'all' # Reset to 'all'
+                      selected_course_name = None # Keep it None if not found
+                      flash("Invalid course selected.", "warning") # Inform the user
+             except ValueError:
+                 # Handle case where course_id is not a valid integer and not 'all'
+                 selected_course_id = 'all' # Reset to 'all'
+                 selected_course_name = None # Keep it None
+                 flash("Invalid course ID format.", "warning") # Inform the user
+
+
+        # Construct the WHERE clause for low attendance query
+        low_attendance_where_sql = ""
+        if low_attendance_where_clauses:
+            low_attendance_where_sql = " WHERE " + " AND ".join(low_attendance_where_clauses)
+
+
         low_attendance_sql = f"""
             SELECT
                 s.id,
@@ -511,11 +558,14 @@ def reports():
                 COUNT(a.id) AS student_total_period
             FROM students s
             LEFT JOIN attendance a ON s.id = a.student_id
-            {date_filter_sql.replace(' WHERE', 'WHERE') if date_filter_sql else ''}
+            {low_attendance_where_sql}
             GROUP BY s.id, s.roll_number, s.name
-            HAVING COUNT(a.id) > 0 -- Only include students with attendance records in the period
+            HAVING COUNT(a.id) > 0 -- Only include students with attendance records in the filtered period/course
         """
-        cursor.execute(low_attendance_sql, query_params)
+        # print(f"Low attendance SQL: {low_attendance_sql}") # Debugging
+        # print(f"Low attendance params: {low_attendance_query_params}") # Debugging
+
+        cursor.execute(low_attendance_sql, low_attendance_query_params) # Use low_attendance_query_params
         period_student_stats = cursor.fetchall()
         low_attendance_students = []
 
@@ -545,6 +595,7 @@ def reports():
         # Ensure dates are None if error occurs before they are set
         if 'start_date' not in locals(): start_date = None
         if 'end_date' not in locals(): end_date = None
+        # selected_course_name is already initialized to None
 
     finally:
         conn.close()
@@ -557,6 +608,9 @@ def reports():
                            low_threshold=low_threshold,
                            semesters=SEMESTER_DATES.keys(), # Pass semester keys for dropdown
                            selected_semester=selected_semester, # Pass selected semester
+                           all_courses=all_courses, # Pass list of all courses
+                           selected_course_id=selected_course_id, # Pass selected course ID
+                           selected_course_name=selected_course_name, # Pass selected course name
                            start_date=start_date, # Pass start date
                            end_date=end_date) # Pass end date
 
