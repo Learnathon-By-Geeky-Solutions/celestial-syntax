@@ -1,0 +1,281 @@
+{% extends "base.html" %}
+{% block title %}Attendance Reports{% endblock %}
+
+{% block content %}
+<div class="dashboard-header mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap">
+        <h1 class="display-5 fw-bold text-dark mb-0"><i class="fas fa-chart-pie me-2"></i>Attendance Reports</h1>
+        <form method="GET" action="{{ url_for('reports') }}" class="row g-2 align-items-center">
+            <div class="col-auto">
+                <label for="semesterSelect" class="col-form-label">Select Semester:</label>
+            </div>
+            <div class="col-auto">
+                <select name="semester" id="semesterSelect" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <option value="all" {% if selected_semester == 'all' %}selected{% endif %}>All Time</option>
+                    {% for sem in semesters | sort %} {# Sort semesters for display #}
+                    <option value="{{ sem }}" {% if selected_semester == sem %}selected{% endif %}>{{ sem }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+             <noscript><button type="submit" class="btn btn-primary btn-sm col-auto">View</button></noscript>
+        </form>
+    </div>
+     <p class="text-muted">
+        {% if selected_semester != 'all' and start_date and end_date %}
+            Showing data for Semester <strong>{{ selected_semester }}</strong> ({{ start_date }} to {{ end_date }})
+        {% else %}
+            Showing data for <strong>All Time</strong>
+        {% endif %}
+    </p>
+</div>
+
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endfor %}
+    {% endif %}
+{% endwith %}
+
+
+<div class="row g-4 mb-4">
+    <div class="col-md-4">
+        <div class="card text-center h-100 shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title text-primary">Overall Attendance</h5>
+                <p class="display-4 fw-bold">{{ overall_percentage }}%</p>
+                <p class="text-muted mb-0">Attendance rate for the selected period</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card text-center h-100 shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title text-success">Total Present Marks</h5>
+                {# Calculate sum directly here if needed, or pass from backend #}
+                {% set total_present = attendance_trend.present_counts | sum %}
+                <p class="display-4 fw-bold">{{ "{:,}".format(total_present) }}</p>
+                 <p class="text-muted mb-0">Sum of 'present' marks in period</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card text-center h-100 shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title text-secondary">Total Records Logged</h5>
+                 {% set total_records = attendance_trend.total_counts | sum %}
+                 <p class="display-4 fw-bold">{{ "{:,}".format(total_records) }}</p>
+                 <p class="text-muted mb-0">Total records in period</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-lg-6">
+        <div class="card h-100 shadow-sm">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-chalkboard-teacher me-2"></i>Attendance by Course (%)</h5>
+            </div>
+            <div class="card-body">
+                {% if course_stats %}
+                    <canvas id="courseAttendanceChart"></canvas>
+                {% else %}
+                    <p class="text-center text-muted mt-3">No course attendance data available for this period.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card h-100 shadow-sm">
+            <div class="card-header">
+                 <h5 class="mb-0"><i class="fas fa-wave-square me-2"></i>Attendance Trend (% by Month)</h5>
+            </div>
+            <div class="card-body">
+                 {% if attendance_trend.labels %}
+                    <canvas id="attendanceTrendChart"></canvas>
+                 {% else %}
+                    <p class="text-center text-muted mt-3">No attendance trend data available for this period.</p>
+                 {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-header bg-warning">
+                 <h5 class="mb-0"><i class="fas fa-user-times me-2"></i>Students with Attendance < {{ low_threshold }}% (in Period)</h5>
+            </div>
+            <div class="card-body">
+                {% if low_attendance_students %}
+                <div class="table-responsive">
+                    <table class="table table-hover table-sm align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Roll No.</th>
+                                <th>Name</th>
+                                <th>Present (Period)</th>
+                                <th>Total Classes (Period)</th>
+                                <th>Attendance % (Period)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for student in low_attendance_students %}
+                            <tr>
+                                <td>{{ student.roll_number }}</td>
+                                <td>{{ student.name }}</td>
+                                <td>{{ student.present }}</td>
+                                <td>{{ student.total }}</td>
+                                <td>
+                                    <div class="progress" style="height: 18px; font-size: 0.8em;">
+                                        <div class="progress-bar bg-danger" role="progressbar"
+                                             style="width: {{ student.percentage }}%"
+                                             aria-valuenow="{{ student.percentage }}" aria-valuemin="0" aria-valuemax="100">
+                                            {{ student.percentage }}%
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="alert alert-success text-center mb-0">
+                    <i class="fas fa-check-circle me-2"></i>All students with attendance records in this period meet the {{ low_threshold }}% threshold!
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // --- Course Attendance Chart ---
+    const courseCtx = document.getElementById('courseAttendanceChart');
+    const courseDataRaw = {{ course_stats | tojson }}; // Get full stats
+
+    if (courseCtx && courseDataRaw && courseDataRaw.length > 0) {
+        const courseLabels = courseDataRaw.map(item => item.name);
+        const coursePercentages = courseDataRaw.map(item => item.percentage);
+
+        // Generate colors dynamically
+        const courseBackgroundColors = coursePercentages.map((_, index) => `hsl(${index * (360 / coursePercentages.length)}, 70%, 60%)`);
+        const courseBorderColors = coursePercentages.map((_, index) => `hsl(${index * (360 / coursePercentages.length)}, 70%, 40%)`);
+
+        new Chart(courseCtx.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: courseLabels,
+                datasets: [{
+                    label: 'Attendance %',
+                    data: coursePercentages,
+                    backgroundColor: courseBackgroundColors,
+                    borderColor: courseBorderColors,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                 responsive: true,
+                 maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                         ticks: {
+                            callback: function(value) { return value + '%'; }
+                        }
+                    }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                         callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) { label += ': '; }
+                                if (context.parsed.y !== null) { label += context.parsed.y + '%'; }
+                                // Add total/present counts to tooltip
+                                const dataIndex = context.dataIndex;
+                                const courseInfo = courseDataRaw[dataIndex];
+                                if(courseInfo){
+                                    label += ` (${courseInfo.present}/${courseInfo.total})`;
+                                }
+                                return label;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    } // End if courseCtx
+
+    // --- Attendance Trend Chart ---
+    const trendCtx = document.getElementById('attendanceTrendChart');
+    const trendDataRaw = {{ attendance_trend | tojson }};
+
+    if (trendCtx && trendDataRaw && trendDataRaw.labels.length > 0) {
+         const trendLabels = trendDataRaw.labels;
+         const trendPercentages = trendDataRaw.percentages;
+
+        new Chart(trendCtx.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: trendLabels,
+                datasets: [{
+                    label: 'Monthly Attendance %',
+                    data: trendPercentages,
+                    fill: true,
+                    borderColor: 'rgb(75, 192, 192)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                         ticks: {
+                            callback: function(value) { return value + '%'; }
+                        }
+                    }
+                },
+                 plugins: {
+                    tooltip: {
+                         callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) { label += ': '; }
+                                if (context.parsed.y !== null) { label += context.parsed.y + '%'; }
+                                // Add total/present counts for the month
+                                const dataIndex = context.dataIndex;
+                                const presentCount = trendDataRaw.present_counts[dataIndex];
+                                const totalCount = trendDataRaw.total_counts[dataIndex];
+                                if(presentCount !== undefined && totalCount !== undefined){
+                                     label += ` (${presentCount}/${totalCount})`;
+                                }
+                                return label;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    } // End if trendCtx
+});
+</script>
+{% endblock %}
