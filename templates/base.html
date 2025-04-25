@@ -1,3 +1,4 @@
+{# --- START OF FILE base.html --- #}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,87 +10,282 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         :root {
-            --primary: #2563eb;
-            --secondary: #1e40af;
-            --accent: #f59e0b;
-            --light: #f8fafc;
-            --dark: #0f172a;
+            --primary: #2563eb; /* A blue */
+            --secondary: #1e40af; /* Darker blue */
+            --success: #16a34a; /* Green */
+            --info: #0ea5e9; /* Light blue */
+            --warning: #f59e0b; /* Amber */
+            --danger: #dc2626; /* Red */
+            --light: #f8fafc; /* Very light gray */
+            --dark: #0f172a; /* Very dark blue */
         }
 
         body {
             font-family: 'Poppins', sans-serif;
             background: var(--light);
+            color: var(--dark); /* Default text color */
         }
+
+        /* Apply brand colors to Bootstrap classes */
+        .bg-primary { background-color: var(--primary) !important; }
+        .bg-secondary { background-color: var(--secondary) !important; }
+        .bg-success { background-color: var(--success) !important; }
+        .bg-info { background-color: var(--info) !important; }
+        .bg-warning { background-color: var(--warning) !important; }
+        .bg-danger { background-color: var(--danger) !important; }
+
+        .text-primary { color: var(--primary) !important; }
+        .text-secondary { color: var(--secondary) !important; }
+        .text-success { color: var(--success) !important; }
+        .text-info { color: var(--info) !important; }
+        .text-warning { color: var(--warning) !important; }
+        .text-danger { color: var(--danger) !important; }
+
+        .btn-primary {
+            background-color: var(--primary);
+            border-color: var(--primary);
+        }
+         .btn-primary:hover {
+             background-color: var(--secondary);
+             border-color: var(--secondary);
+         }
+
+        .btn-outline-danger {
+            color: var(--danger);
+            border-color: var(--danger);
+        }
+        .btn-outline-danger:hover {
+            background-color: var(--danger);
+            color: white;
+        }
+         .btn-secondary {
+             background-color: #6c757d; /* Default Bootstrap secondary */
+             border-color: #6c757d;
+             color: white;
+         }
+          .btn-secondary:hover {
+               background-color: #5a6268;
+               border-color: #545b62;
+          }
+         .btn-success {
+             background-color: var(--success);
+             border-color: var(--success);
+         }
+         .btn-info {
+             background-color: var(--info);
+             border-color: var(--info);
+         }
+
 
         .navbar {
             background: linear-gradient(135deg, var(--primary), var(--secondary));
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding-top: 0.5rem;
+            padding-bottom: 0.5rem;
+        }
+
+        .navbar-brand img {
+            margin-right: 0.5rem;
         }
 
         .nav-link {
-            color: white !important;
-            font-weight: 500;
-            transition: 0.3s;
+            color: rgba(255, 255, 255, 0.85) !important; /* Slightly transparent white */
+            font-weight: 400;
+            transition: color 0.3s ease-in-out;
+            padding: 0.5rem 1rem; /* Adjust padding */
         }
 
         .nav-link:hover {
-            transform: translateY(-2px);
+            color: white !important;
+            text-decoration: underline; /* Underline on hover */
         }
+         .nav-link.active {
+             color: white !important;
+             font-weight: 500;
+             text-decoration: underline;
+         }
 
         .card {
             border: none;
-            border-radius: 15px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-            transition: 0.3s;
+            border-radius: 12px; /* Slightly smaller border-radius */
+            box-shadow: 0 3px 8px rgba(0,0,0,0.08); /* Lighter shadow */
+            /* Removed hover transform to avoid interference */
         }
 
-        .card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 8px 15px rgba(0,0,0,0.1);
-        }
+        /* Removed card:hover transform */
+        /* .card:hover { box-shadow: 0 6px 12px rgba(0,0,0,0.12); } */
 
-        .btn-primary {
-            background: var(--primary);
-            border: none;
-            padding: 10px 25px;
-            border-radius: 8px;
-        }
+         .card-title {
+             font-weight: 600;
+             color: var(--dark); /* Match body text color */
+         }
 
         .table-hover tbody tr:hover {
             background-color: rgba(37, 99, 235, 0.05);
         }
 
         .status-badge {
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 0.9em;
+            display: inline-block;
+            padding: 0.3em 0.6em; /* Adjusted padding */
+            border-radius: 15px; /* More rounded */
+            font-size: 0.85em; /* Slightly larger font */
+            font-weight: 500; /* Medium weight */
+            text-align: center;
         }
 
-        .present { background: #dcfce7; color: #166534; }
-        .absent { background: #fee2e2; color: #991b1b; }
+        .present { background: #dcfce7; color: #166534; border: 1px solid #86efac;} /* Light green background, dark green text, border */
+        .absent { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5;} /* Light red background, dark red text, border */
+
+         /* Table header styling */
+         .table th {
+             font-weight: 600;
+             color: var(--secondary); /* Darker blue for headers */
+         }
+
+         /* Table sorting icons */
+         th[onclick^="sortTable"] {
+             cursor: pointer;
+         }
+          th[onclick^="sortTable"] i.fas {
+              margin-left: 5px;
+              font-size: 0.75em; /* Slightly smaller icon */
+              color: rgba(0, 0, 0, 0.4); /* Lighter icon color */
+          }
+          th[onclick^="sortTable"]:hover i.fas {
+               color: rgba(0, 0, 0, 0.6); /* Darker on hover */
+          }
+           th[onclick^="sortTable"] i.fa-sort-up,
+           th[onclick^="sortTable"] i.fa-sort-down {
+               color: var(--primary); /* Primary color for active sort */
+               font-weight: bold;
+               font-size: 0.85em; /* Slightly larger active icon */
+           }
+
+        /* Progress bar styling for attendance percentage */
+        .progress {
+            height: 20px;
+            font-size: 0.85em;
+            background-color: #e9ecef; /* Light grey background for empty part */
+        }
+        .progress-bar {
+            color: #212529 !important; /* Dark text for readability */
+            font-weight: bold;
+            text-align: center;
+             /* Default: success green */
+             background-color: var(--success);
+        }
+         .progress-bar.bg-danger {
+             background-color: var(--danger);
+         }
+         .progress-bar.bg-warning {
+             background-color: var(--warning);
+             color: var(--dark) !important; /* Ensure text readable on yellow */
+         }
+
+         /* Dashboard card icon circles */
+         .bg-primary.rounded-circle { background-color: var(--primary) !important; }
+         .bg-success.rounded-circle { background-color: var(--success) !important; }
+         .bg-info.rounded-circle { background-color: var(--info) !important; }
+         .shadow-sm { box-shadow: 0 .125rem .25rem rgba(0,0,0,.075)!important; }
+
+
     </style>
+     {# Add block for custom head content like chart.js #}
+    {% block head_content %}{% endblock %}
+
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark">
-        <div class="container">
-            <a class="navbar-brand" href="/">
-                <img src="/static/logo.png" alt="Logo" height="40">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('index') }}">
+                 {# Assuming logo.png exists in static folder #}
+                 {# Remove leading slash if using url_for #}
+                <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo" height="35">
                 <span class="ms-2">Smart Attendance</span>
             </a>
-            <div class="collapse navbar-collapse">
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item">
-                        <a class="nav-link" href="/"><i class="fas fa-home me-2"></i>Dashboard</a>
-                    </li>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                    {# Show these links ONLY if logged in #}
+                     {% if session.get('user_id') %}
+                         <li class="nav-item">
+                             <a class="nav-link {% if request.endpoint == 'index' %}active{% endif %}" href="{{ url_for('index') }}">
+                                <i class="fas fa-tachometer-alt me-1"></i>Dashboard
+                             </a>
+                         </li>
+                         <li class="nav-item">
+                             <a class="nav-link {% if request.endpoint == 'take_attendance' %}active{% endif %}" href="{{ url_for('take_attendance') }}">
+                                <i class="fas fa-camera me-1"></i>Take Attendance
+                             </a>
+                         </li>
+                         <li class="nav-item">
+                             <a class="nav-link {% if request.endpoint == 'register' %}active{% endif %}" href="{{ url_for('register') }}">
+                                <i class="fas fa-user-plus me-1"></i>Register Face
+                             </a>
+                         </li>
+                         <li class="nav-item">
+                              <a class="nav-link {% if request.endpoint == 'reports' %}active{% endif %}" href="{{ url_for('reports') }}">
+                                <i class="fas fa-chart-bar me-1"></i>Reports
+                              </a>
+                         </li>
+                         {# Optional: Link to add course if you implement it #}
+                         {# <li class="nav-item">
+                             <a class="nav-link {% if request.endpoint == 'add_course' %}active{% endif %}" href="{{ url_for('add_course') }}">Add Course</a>
+                         </li> #}
+                     {% endif %}
+                </ul>
+                <ul class="navbar-nav">
+                    {# User/Login Status #}
+                    {% if session.get('user_id') %}
+                         <li class="nav-item d-flex align-items-center">
+                             <span class="navbar-text text-white me-3">
+                                 <i class="fas fa-user-circle me-1"></i>Hello, <strong>{{ session.get('username') }}</strong>
+                             </span>
+                         </li>
+                        <li class="nav-item">
+                             <form action="{{ url_for('logout') }}" method="POST" class="d-inline">
+                                 {# Use a button styled as a nav-link #}
+                                <button type="submit" class="nav-link btn btn-link text-white py-2 px-3">
+                                    <i class="fas fa-sign-out-alt me-1"></i>Logout
+                                </button>
+                             </form>
+                         </li>
+                    {% else %}
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.endpoint == 'login' %}active{% endif %}" href="{{ url_for('login') }}">
+                                <i class="fas fa-sign-in-alt me-1"></i>Login
+                            </a>
+                        </li>
+                    {% endif %}
                 </ul>
             </div>
         </div>
     </nav>
 
-    <main class="container py-4">
-        {% block content %}{% endblock %}
-    </main>
+     <div class="container mt-4">
+         {# Flash Messages Section - Show messages here below the navbar #}
+         {% with messages = get_flashed_messages(with_categories=true) %}
+             {% if messages %}
+                 <div class="flash-messages mb-3">
+                     {% for category, message in messages %}
+                         <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                             {{ message }}
+                             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                         </div>
+                     {% endfor %}
+                 </div>
+             {% endif %}
+         {% endwith %}
 
+        {# This block is where the content of specific pages will be injected #}
+        {% block content %}{% endblock %}
+    </div>
+
+    <!-- Bootstrap JS with Popper -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    {% block scripts %}{% endblock %} {# Allows adding page-specific scripts #}
 </body>
 </html>
