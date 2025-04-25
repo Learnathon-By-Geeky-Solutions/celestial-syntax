@@ -11,26 +11,18 @@ import pandas as pd
 from collections import defaultdict
 import datetime
 import sys
-import hashlib # Import hashlib for password hashing
 import functools # Import functools for the login_required decorator
+import bcrypt # Import bcrypt for password hashing
 
-# --- Security Note ---
-# For production, use a stronger password hashing library like 'bcrypt'
-# and consider the Flask-Login extension for robust session management.
-# This example uses hashlib and manual session management for simplicity.
 
 facial_recognition_process = None
 app = Flask(__name__)
-# You MUST set a secret key for session management
-app.secret_key = os.urandom(24) # Generates a random secret key
+
+app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24)) 
 
 FACE_IMAGES_DIR = "data/data_faces_from_camera/"
 os.makedirs(FACE_IMAGES_DIR, exist_ok=True)
 DB_NAME = 'attendance.db' # Define DB Name centrally
-
-# --- Semester Date Ranges ---
-# Define the start and end dates for each semester
-# Ensure the date format is 'YYYY-MM-DD'
 SEMESTER_DATES = {
     "1.1": ("2022-03-01", "2022-08-31"),
     "1.2": ("2022-09-01", "2023-03-31"),
@@ -41,18 +33,30 @@ SEMESTER_DATES = {
     # Add more semesters as needed
 }
 
-# --- Password Hashing Helpers ---
+# --- Password Hashing Helpers (Using bcrypt) ---
 def hash_password(password):
-    """Hashes a password using SHA-256."""
-    # Using sha256 for simplicity, bcrypt is recommended for production
-    return hashlib.sha256(password.encode()).hexdigest()
+    """Hashes a password using bcrypt."""
+    # bcrypt.gensalt() generates a salt (and work factor)
+    # bcrypt.hashpw() takes the password (as bytes) and the salt (as bytes)
+    # We encode the password string to bytes using UTF-8
+    hashed_bytes = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+    # Store the result as a UTF-8 string in the database
+    return hashed_bytes.decode('utf-8')
 
-def check_password(hashed_password, password):
-    """Checks if a password matches the hashed password."""
+def check_password(hashed_password_str, password_str):
+    """Checks if a password matches the hashed password using bcrypt."""
     # This function is called *after* retrieving the hashed_password from DB
-    if not hashed_password: # Handle case where no user was found (prevents error)
-        return False
-    return hashed_password == hash_password(password)
+    if not hashed_password_str:
+        return False # No stored hash to compare against (e.g., user not found)
+
+    try:
+        # bcrypt.checkpw takes the plain password (as bytes) and the stored hash (as bytes)
+        # We encode both strings to bytes using UTF-8
+        return bcrypt.checkpw(password_str.encode('utf-8'), hashed_password_str.encode('utf-8'))
+    except ValueError:
+        # This can happen if the stored hash is not a valid bcrypt hash (e.g., old format or corrupted)
+        print("Warning: Stored password hash is not a valid bcrypt hash format.", file=sys.stderr)
+        return False # Treat invalid hash format as incorrect password
 
 # --- Database Helper ---
 def get_db():
@@ -61,79 +65,6 @@ def get_db():
     conn.row_factory = sqlite3.Row # Return rows as dictionary-like objects
     return conn
 
-def init_db():
-    """Initializes the database and creates tables if they don't exist."""
-    # Use app.app_context() to allow access to the app config (like secret key)
-    with app.app_context():
-        db = get_db()
-        cursor = db.cursor()
-
-        # Create students table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS students (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                roll_number TEXT UNIQUE NOT NULL,
-                name TEXT NOT NULL
-            )
-        ''')
-
-        # Create courses table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS courses (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE NOT NULL
-            )
-        ''')
-
-        # Create attendance table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS attendance (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_id INTEGER,
-                course_id INTEGER,
-                date TEXT NOT NULL, -- Store date as YYYY-MM-DD
-                present BOOLEAN NOT NULL CHECK (present IN (0, 1)),
-                FOREIGN KEY (student_id) REFERENCES students(id),
-                FOREIGN KEY (course_id) REFERENCES courses(id)
-            )
-        ''')
-
-        # --- NEW: Create teachers table ---
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS teachers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL
-            )
-        ''')
-
-        # --- NEW: Add a default teacher if none exist ---
-        cursor.execute("SELECT COUNT(*) FROM teachers")
-        count = cursor.fetchone()[0]
-        if count == 0:
-            # Create a default teacher username/password
-            # Use environment variables for better security in production
-            default_username = os.environ.get('DEFAULT_TEACHER_USERNAME', 'admin')
-            default_password = os.environ.get('DEFAULT_TEACHER_PASSWORD', 'sh1100!!') # **CHANGE THIS IN PRODUCTION**
-            hashed_default_password = hash_password(default_password)
-            try:
-                cursor.execute("INSERT INTO teachers (username, password_hash) VALUES (?, ?)",
-                               (default_username, hashed_default_password))
-                db.commit()
-                print(f"--- Default teacher '{default_username}' created. PLEASE CHANGE THE DEFAULT PASSWORD! ---")
-            except sqlite3.Error as e:
-                 print(f"Error creating default teacher: {e}")
-                 db.rollback()
-
-
-        db.commit()
-        db.close()
-
-# Initialize DB on application startup if not already done
-# This is a common pattern; the app_context ensures Flask's config is available
-# when get_db is called indirectly.
-with app.app_context():
-    init_db()
 
 # --- Authentication Decorator ---
 def login_required(view):
@@ -148,7 +79,7 @@ def login_required(view):
         return view(**kwargs)
     return wrapped_view
 
-# --- NEW: Login Route ---
+# --- Login Route ---
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     print("--- Hit /login route ---")
@@ -171,6 +102,7 @@ def login():
 
             if teacher is None:
                 error = 'Incorrect username.'
+            # Use the NEW check_password function with bcrypt
             elif not check_password(teacher['password_hash'], password):
                 error = 'Incorrect password.'
 
@@ -192,6 +124,9 @@ def login():
         except sqlite3.Error as e:
              flash(f"Database error during login: {e}", "danger")
              print(f"Login DB error: {e}", file=sys.stderr) # Log error for debugging
+        except Exception as e: # Catch potential errors from check_password (like invalid hash format)
+             flash("An unexpected error occurred during login.", "danger")
+             print(f"Unexpected error during login: {e}", file=sys.stderr) # Log error for debugging
         finally:
             conn.close()
 
@@ -201,7 +136,7 @@ def login():
     # GET request: Display login form
     return render_template('login.html')
 
-# --- NEW: Logout Route ---
+# --- Logout Route ---
 @app.route('/logout', methods=['POST']) # Use POST for logout for security best practice
 @login_required # Only logged-in users can explicitly log out
 def logout():
@@ -1290,11 +1225,6 @@ def student_semester_attendance():
                     # Calculate percentage
                     percentage = (total_present / total_classes_held) * 100 if total_classes_held > 0 else 0
                     print(f" - Percentage: {round(percentage, 2)}%")
-
-
-                    # Add the course details to the list. We show all courses that had sessions,
-                    # even if the student was absent for all, to provide a complete picture.
-                    # Only add if the course actually had classes held in the semester
                     if total_classes_held > 0:
                          course_attendance_details.append({
                               'course_name': course_name,
@@ -1303,14 +1233,11 @@ def student_semester_attendance():
                               'classes_absent': total_absent,
                               'percentage': round(percentage, 2)
                          })
-                # Sort course details by course name (already done in the query, but explicit sort is safe)
-                # course_attendance_details.sort(key=lambda x: x['course_name'])
+ 
 
                 if student_res and not course_attendance_details:
-                     # This case happens if student exists, semester is valid, but no courses listed
-                     # for them had sessions recorded in the attendance table for this specific semester.
                      flash(f"No attendance records found for {student_name} ({roll_number}) in any course within semester {selected_semester}.", "info")
-                     no_student_data = True # Nothing to show for the student in this semester
+                     no_student_data = True 
                      print("Student found, but no attendance records in this semester/course.")
 
 
@@ -1322,19 +1249,19 @@ def student_semester_attendance():
         conn.close()
 
     print("Rendering index.html with student semester lookup results.")
-    # Render index template, passing all necessary context
     return render_template('index.html',
-                           selected_date='', # Keep other context variables for other sections of index.html
-                           no_data=False, # Ensure this is False for daily report section
-                           courses=courses_for_daily_lookup, # Always needed for daily form
-                           semesters=SEMESTER_DATES.keys(), # Always needed for this form
-                           student_lookup_data=student_data, # The student's details (or None)
-                           course_attendance_details=course_attendance_details, # List of course attendance (or empty)
-                           no_student_data=no_student_data, # Flag for display message
-                           overall_percentage=overall_percentage, # Pass dashboard stats
+                           selected_date='', 
+                           no_data=False, 
+                           courses=courses_for_daily_lookup, 
+                           semesters=SEMESTER_DATES.keys(), 
+                           student_lookup_data=student_data, 
+                           course_attendance_details=course_attendance_details, 
+                           no_student_data=no_student_data, 
+                           overall_percentage=overall_percentage, 
                            total_students=total_students,
-                           logged_in_username=session.get('username')) # Pass user info for display in base.html
+                           logged_in_username=session.get('username')) 
 
 
 if __name__ == '__main__':
+
     app.run(debug=True, host='0.0.0.0', port=5000)
