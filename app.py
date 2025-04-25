@@ -18,6 +18,11 @@ import bcrypt # Import bcrypt for password hashing
 facial_recognition_process = None
 app = Flask(__name__)
 
+# --- Error Handler for Database Errors ---
+@app.errorhandler(sqlite3.Error)
+def handle_db_error(error):
+    return render_template('500.html', message="A database error occurred: {}".format(error)), 500
+
 app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24)) 
 
 FACE_IMAGES_DIR = "data/data_faces_from_camera/"
@@ -1259,9 +1264,9 @@ def student_semester_attendance():
                            no_student_data=no_student_data, 
                            overall_percentage=overall_percentage, 
                            total_students=total_students,
-                           logged_in_username=session.get('username')) 
+                           logged_in_username=session.get('username')) # Pass user info for display in base.html
 
 
 if __name__ == '__main__':
 
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)
