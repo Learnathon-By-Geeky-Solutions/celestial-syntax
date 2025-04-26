@@ -31,6 +31,8 @@ os.makedirs(FACE_IMAGES_DIR, exist_ok=True)
 DB_NAME = 'attendance.db' # Define DB Name centrally
 ATTENDANCE_SUMMARY_QUERY = "SELECT SUM(present), COUNT(*) FROM attendance"
 SELECT_COURSES_QUERY = "SELECT id, name FROM courses"
+SELECT_COURSE_NAME_BY_ID_QUERY = "SELECT name FROM courses WHERE id = ?"
+SELECT_STUDENT_COUNT_QUERY = "SELECT COUNT(*) FROM students"
 INDEX_TEMPLATE = "index.html"
 SANITIZE_REGEX = r'[^\w-]+'
 SEMESTER_DATES = {
@@ -190,7 +192,7 @@ def index():
         print(f"Overall attendance: {overall_present}/{overall_total} ({overall_percentage}%)")
 
         # 2. Total Students Registered
-        cursor.execute("SELECT COUNT(*) FROM students")
+        cursor.execute(SELECT_STUDENT_COUNT_QUERY)
         students_res = cursor.fetchone()
         total_students = students_res[0] if students_res and students_res[0] is not None else 0
         print(f"Total registered students: {total_students}")
@@ -243,7 +245,7 @@ def attendance():
         overall_total = overall_res[1] if overall_res and overall_res[1] is not None else 0
         overall_percentage = round((overall_present / overall_total) * 100, 1) if overall_total > 0 else 0
 
-        cursor.execute("SELECT COUNT(*) FROM students")
+        cursor.execute(SELECT_STUDENT_COUNT_QUERY)
         students_res = cursor.fetchone()
         total_students = students_res[0] if students_res and students_res[0] is not None else 0
     except Exception as e:
@@ -279,7 +281,7 @@ def attendance():
 
         try:
             # Fetch course name
-            cursor.execute("SELECT name FROM courses WHERE id = ?", (course_id,))
+            cursor.execute(SELECT_COURSE_NAME_BY_ID_QUERY, (course_id,))
             course_res = cursor.fetchone()
             if course_res:
                 selected_course_name = course_res['name']
@@ -964,7 +966,7 @@ def reports():
         if selected_course_id != 'all':
             try:
                 course_id_int = int(selected_course_id)
-                cursor.execute("SELECT name FROM courses WHERE id = ?", (course_id_int,))
+                cursor.execute(SELECT_COURSE_NAME_BY_ID_QUERY, (course_id_int,))
                 course_name_res = cursor.fetchone()
                 if course_name_res:
                     low_attendance_where_clauses.append("a.course_id = ?")
@@ -1066,7 +1068,7 @@ def reports():
              try:
                  course_id_int = int(selected_course_id)
                  # Check if the course_id actually exists
-                 cursor.execute("SELECT name FROM courses WHERE id = ?", (course_id_int,))
+                 cursor.execute(SELECT_COURSE_NAME_BY_ID_QUERY, (course_id_int,))
                  course_name_res = cursor.fetchone()
                  if course_name_res:
                       low_attendance_where_clauses.append("a.course_id = ?")
@@ -1195,7 +1197,7 @@ def student_semester_attendance():
         overall_total = overall_res[1] if overall_res and overall_res[1] is not None else 0
         overall_percentage = round((overall_present / overall_total) * 100, 1) if overall_total > 0 else 0
 
-        cursor.execute("SELECT COUNT(*) FROM students")
+        cursor.execute(SELECT_STUDENT_COUNT_QUERY)
         students_res = cursor.fetchone()
         total_students = students_res[0] if students_res and students_res[0] is not None else 0
     except Exception as e:
