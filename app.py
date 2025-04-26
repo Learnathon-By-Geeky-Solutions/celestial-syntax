@@ -148,7 +148,7 @@ def login():
 def logout():
     print("--- Hit /logout route ---")
     session.pop('user_id', None)
-    session.pop('username', None)
+    session.pop('username', None)  # Not using clear_registration_session here, only user keys
     # session.pop('next_url', None) # Clear stored next_url too
     print("User logged out.")
     flash("You have been logged out.", "info")
@@ -481,7 +481,7 @@ def register():
 
 def create_folder():
     print("--- Hit /create_folder route ---")
-    _clear_registration_session()
+    clear_registration_session()
     try:
         data = request.get_json()
         name, roll_number = data.get('name'), data.get('roll_number')
@@ -506,11 +506,13 @@ def create_folder():
             return jsonify({"status": "warning", "message": f"Warning: {err_str}"}), 200
         return jsonify({"status": "error", "message": f"Server error creating folder: {err_str}"}), 500
 
-def _clear_registration_session():
-    session.pop('current_folder', None)
-    session.pop('roll_number', None)
-    session.pop('name', None)
-    session.pop('is_existing_student', None)
+def clear_registration_session():
+    for key in ['current_folder', 'roll_number', 'name', 'is_existing_student']:
+        session.pop(key, None)
+
+def registration_session_valid():
+    required = ['current_folder', 'roll_number', 'name']
+    return all(k in session for k in required)
 
 def _validate_folder_inputs(name, roll_number):
     if not name or not roll_number:
@@ -594,7 +596,7 @@ def _set_registration_session(folder_path, roll_number, name, is_existing_studen
 def capture_image():
     print("--- Hit /capture_image route ---")
     # Ensure required session data exists
-    if 'current_folder' not in session or 'roll_number' not in session or 'name' not in session:
+    if not registration_session_valid():
         flash("Session expired or registration not started. Please start registration again.", "danger")
         # Clear session data if it's incomplete/invalid
         session.pop('current_folder', None)
@@ -610,11 +612,7 @@ def capture_image():
 
     if not os.path.isdir(folder_path):
          flash(f"Registration folder {os.path.basename(folder_path)} not found on server. Please start registration again.", "danger")
-         # Clear session data as the folder is gone
-         session.pop('current_folder', None)
-         session.pop('roll_number', None)
-         session.pop('name', None)
-         session.pop('is_existing_student', None)
+         clear_registration_session()
          print(f"Registration folder not found: {folder_path}")
          return jsonify({"status": "error", "message": f"Registration folder not found."}), 404
 
@@ -722,13 +720,9 @@ def capture_image():
 def finalize_registration():
     print("--- Hit /finalize_registration route ---")
     # Check if required session data exists
-    if 'roll_number' not in session or 'name' not in session or 'current_folder' not in session:
+    if not registration_session_valid():
         flash("Session expired or registration not started. Please start registration over.", "danger")
-        # Clear session data if it's incomplete/invalid
-        session.pop('current_folder', None)
-        session.pop('roll_number', None)
-        session.pop('name', None)
-        session.pop('is_existing_student', None)
+        clear_registration_session()
         print("Session data missing for finalization.")
         return jsonify({"status": "error", "message": "Session data missing for finalization."}), 400 # Use JSON for AJAX response
 
