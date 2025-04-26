@@ -147,9 +147,7 @@ def login():
 @login_required # Only logged-in users can explicitly log out
 def logout():
     print("--- Hit /logout route ---")
-    session.pop('user_id', None)
-    session.pop('username', None)  # Not using clear_registration_session here, only user keys
-    # session.pop('next_url', None) # Clear stored next_url too
+    clear_user_session()
     print("User logged out.")
     flash("You have been logged out.", "info")
     # Redirect to the index page, which will then redirect to login if not logged in
@@ -470,10 +468,7 @@ def stop_attendance():
 def register():
     print("--- Hit /register route ---")
     # Clear registration session data when starting registration again
-    session.pop('current_folder', None)
-    session.pop('roll_number', None)
-    session.pop('name', None)
-    session.pop('is_existing_student', None)
+    clear_registration_session()
     return render_template('register_face.html', logged_in_username=session.get('username')) # Pass username
 
 @app.route('/create_folder', methods=['POST'])
@@ -509,6 +504,11 @@ def create_folder():
 def clear_registration_session():
     for key in ['current_folder', 'roll_number', 'name', 'is_existing_student']:
         session.pop(key, None)
+
+def clear_user_session():
+    for key in ['user_id', 'username']:
+        session.pop(key, None)
+
 
 def registration_session_valid():
     required = ['current_folder', 'roll_number', 'name']
