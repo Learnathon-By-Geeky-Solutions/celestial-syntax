@@ -246,6 +246,7 @@
                          </li>
                         <li class="nav-item">
                              <form action="{{ url_for('logout') }}" method="POST" class="d-inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                  {# Use a button styled as a nav-link #}
                                 <button type="submit" class="nav-link btn btn-link text-white py-2 px-3">
                                     <i class="fas fa-sign-out-alt me-1"></i>Logout

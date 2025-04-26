@@ -13,10 +13,11 @@ import datetime
 import sys
 import functools # Import functools for the login_required decorator
 import bcrypt # Import bcrypt for password hashing
-
+from flask_wtf import CSRFProtect
 
 facial_recognition_process = None
 app = Flask(__name__)
+csrf = CSRFProtect(app)
 
 # --- Error Handler for Database Errors ---
 @app.errorhandler(sqlite3.Error)
@@ -375,9 +376,10 @@ def take_attendance():
         # Get the selected course ID
         course_id = request.form.get('course_id')
         print(f"Received course_id {course_id} for starting attendance.")
-        if not course_id:
-            flash("Please select a valid course.", "warning")
-            print("Course ID missing, redirecting to take_attendance.")
+        # Validate course_id: must be a positive integer
+        if not course_id or not str(course_id).isdigit() or int(course_id) <= 0:
+            flash("Invalid course ID provided.", "warning")
+            print("Invalid course ID, redirecting to take_attendance.")
             return redirect(url_for('take_attendance'))
 
         # Check if a facial recognition process is already running
@@ -1368,4 +1370,4 @@ def student_semester_attendance():
 
 if __name__ == '__main__':
 
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True)
