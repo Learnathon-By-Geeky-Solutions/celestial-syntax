@@ -86,7 +86,7 @@ class Face_Recognizer:
         if os.path.exists("data/features_all.csv"):
             path_features_known_csv = "data/features_all.csv"
             csv_rd = pd.read_csv(path_features_known_csv, header=None)
-            for row in csv_rd.values:
+            for row in csv_rd.to_numpy():
                 roll_number = row[0]  # First column is roll number
                 name = row[1]        # Second column is name
                 features = row[2:].astype(float).tolist()  # Convert to floats here
@@ -325,8 +325,7 @@ class Face_Recognizer:
 
                 logging.debug("Frame ends\n\n")
     def run(self):
-        # cap = cv2.VideoCapture("video.mp4")  # Get video stream from video file
-        cap = cv2.VideoCapture(0)              # Get video stream from camera
+        cap = cv2.VideoCapture(0)             
         self.process(cap)
 
         cap.release()
