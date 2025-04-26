@@ -15,6 +15,10 @@ import functools # Import functools for the login_required decorator
 import bcrypt # Import bcrypt for password hashing
 from flask_wtf import CSRFProtect
 
+APPLICATION_JSON = 'application/json'
+TEXT_HTML = 'text/html'
+LOGIN_HTML = 'login.html'
+
 facial_recognition_process = None
 app = Flask(__name__)
 csrf = CSRFProtect(app)
@@ -22,7 +26,7 @@ csrf = CSRFProtect(app)
 # --- Error Handler for Database Errors ---
 @app.errorhandler(sqlite3.Error)
 def handle_db_error(error):
-    if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.accept_mimetypes['application/json'] > request.accept_mimetypes['text/html']:
+    if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.accept_mimetypes[APPLICATION_JSON] > request.accept_mimetypes[TEXT_HTML]:
         return jsonify({"status": "error", "message": f"A database error occurred: {error}"}), 500
     return render_template('500.html', message="A database error occurred: {}".format(error)), 500
 
@@ -30,14 +34,14 @@ def handle_db_error(error):
 @app.errorhandler(401)
 @app.errorhandler(403)
 def handle_auth_error(error):
-    if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.accept_mimetypes['application/json'] > request.accept_mimetypes['text/html']:
+    if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.accept_mimetypes[APPLICATION_JSON] > request.accept_mimetypes[TEXT_HTML]:
         return jsonify({"status": "error", "message": "Authentication required."}), error.code if hasattr(error, 'code') else 401
-    return render_template('login.html'), error.code if hasattr(error, 'code') else 401
+    return render_template(LOGIN_HTML), error.code if hasattr(error, 'code') else 401
 
 # --- Error Handler for Internal Server Error (500) ---
 @app.errorhandler(500)
 def handle_internal_error(error):
-    if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.accept_mimetypes['application/json'] > request.accept_mimetypes['text/html']:
+    if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.accept_mimetypes[APPLICATION_JSON] > request.accept_mimetypes[TEXT_HTML]:
         return jsonify({"status": "error", "message": "An internal server error occurred."}), 500
     return render_template('500.html', message="An internal server error occurred."), 500
 
@@ -51,6 +55,7 @@ SELECT_COURSES_QUERY = "SELECT id, name FROM courses"
 SELECT_COURSE_NAME_BY_ID_QUERY = "SELECT name FROM courses WHERE id = ?"
 SELECT_STUDENT_COUNT_QUERY = "SELECT COUNT(*) FROM students"
 INDEX_TEMPLATE = "index.html"
+LOGIN_HTML = 'login.html'
 SANITIZE_REGEX = r'[^\w-]+'
 REPORTS_TEMPLATE = "reports.html"
 ALL_COURSES_LABEL = "All Courses"
@@ -104,7 +109,7 @@ def login_required(view):
     def wrapped_view(**kwargs):
         if 'user_id' not in session:
             # If AJAX/JSON request, return JSON error instead of redirect
-            if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.accept_mimetypes['application/json'] > request.accept_mimetypes['text/html']:
+            if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.accept_mimetypes[APPLICATION_JSON] > request.accept_mimetypes[TEXT_HTML]:
                 return jsonify({"status": "error", "message": "Authentication required."}), 401
             flash("Please log in to access this page.", "warning")
             return redirect(url_for('login'))
@@ -163,10 +168,10 @@ def login():
             conn.close()
 
         # If POST fails (error occurred), re-render login page with flash messages
-        return render_template('login.html') # Render the login template again
+        return render_template(LOGIN_HTML) # Render the login template again
 
     # GET request: Display login form
-    return render_template('login.html')
+    return render_template(LOGIN_HTML)
 
 # --- Logout Route ---
 @app.route('/logout', methods=['POST']) # Use POST for logout for security best practice
@@ -997,7 +1002,7 @@ def reports():
                     selected_course_id = 'all'
                     selected_course_name = ALL_COURSES_LABEL
                     flash("Invalid course ID provided in parameters for filtering.", "warning")
-                    print(f"Invalid course ID {course_id} provided for filtering low attendance.")
+                    print(f"Invalid course ID {selected_course_id} provided for filtering low attendance.")
             except ValueError:
                 selected_course_id = 'all'
                 selected_course_name = ALL_COURSES_LABEL
@@ -1100,7 +1105,7 @@ def reports():
                       selected_course_id = 'all' # Reset to 'all'
                       selected_course_name = ALL_COURSES_LABEL # Reset display name
                       flash("Invalid course ID provided in parameters for filtering.", "warning")
-                      print(f"Invalid course ID {course_id} provided for filtering low attendance.")
+                      print(f"Invalid course ID {selected_course_id} provided for filtering low attendance.")
 
              except ValueError:
                  # Handle case where course_id param is not a valid integer and not 'all'
