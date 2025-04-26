@@ -29,6 +29,7 @@ app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24))
 FACE_IMAGES_DIR = "data/data_faces_from_camera/"
 os.makedirs(FACE_IMAGES_DIR, exist_ok=True)
 DB_NAME = 'attendance.db' # Define DB Name centrally
+ATTENDANCE_SUMMARY_QUERY = "SELECT SUM(present), COUNT(*) FROM attendance"
 SEMESTER_DATES = {
     "1.1": ("2022-03-01", "2022-08-31"),
     "1.2": ("2022-09-01", "2023-03-31"),
@@ -178,7 +179,7 @@ def index():
     total_students = 0
     try:
         # 1. Overall Attendance Percentage (All Time)
-        cursor.execute("SELECT SUM(present), COUNT(*) FROM attendance")
+        cursor.execute(ATTENDANCE_SUMMARY_QUERY)
         overall_res = cursor.fetchone()
         overall_present = overall_res[0] if overall_res and overall_res[0] is not None else 0
         overall_total = overall_res[1] if overall_res and overall_res[1] is not None else 0
@@ -233,7 +234,7 @@ def attendance():
     overall_percentage = 0
     total_students = 0
     try:
-        cursor.execute("SELECT SUM(present), COUNT(*) FROM attendance")
+        cursor.execute(ATTENDANCE_SUMMARY_QUERY)
         overall_res = cursor.fetchone()
         overall_present = overall_res[0] if overall_res and overall_res[0] is not None else 0
         overall_total = overall_res[1] if overall_res and overall_res[1] is not None else 0
@@ -1185,7 +1186,7 @@ def student_semester_attendance():
     overall_percentage = 0
     total_students = 0
     try:
-        cursor.execute("SELECT SUM(present), COUNT(*) FROM attendance")
+        cursor.execute(ATTENDANCE_SUMMARY_QUERY)
         overall_res = cursor.fetchone()
         overall_present = overall_res[0] if overall_res and overall_res[0] is not None else 0
         overall_total = overall_res[1] if overall_res and overall_res[1] is not None else 0
