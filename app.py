@@ -22,7 +22,7 @@ csrf = CSRFProtect(app)
 # --- Error Handler for Database Errors ---
 @app.errorhandler(sqlite3.Error)
 def handle_db_error(error):
-    return render_template('500.html', message="A database error occurred: {}".format(error)), 500
+    return render_template(INDEX_TEMPLATE, message="A database error occurred: {}".format(error)), 500
 
 app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24)) 
 
@@ -30,6 +30,9 @@ FACE_IMAGES_DIR = "data/data_faces_from_camera/"
 os.makedirs(FACE_IMAGES_DIR, exist_ok=True)
 DB_NAME = 'attendance.db' # Define DB Name centrally
 ATTENDANCE_SUMMARY_QUERY = "SELECT SUM(present), COUNT(*) FROM attendance"
+SELECT_COURSES_QUERY = "SELECT id, name FROM courses"
+INDEX_TEMPLATE = "index.html"
+SANITIZE_REGEX = r'[^\w-]+'
 SEMESTER_DATES = {
     "1.1": ("2022-03-01", "2022-08-31"),
     "1.2": ("2022-09-01", "2023-03-31"),
@@ -166,7 +169,7 @@ def index():
 
     # Fetch courses for the daily lookup dropdown
     try:
-        cursor.execute("SELECT id, name FROM courses")
+        cursor.execute(SELECT_COURSES_QUERY)
         courses = cursor.fetchall()
         print(f"Fetched {len(courses)} courses.")
     except sqlite3.Error as e:
@@ -200,7 +203,7 @@ def index():
 
     # Pass all necessary data to the index template
     print("Rendering index.html (Dashboard)")
-    return render_template('index.html',
+    return render_template(INDEX_TEMPLATE,
                            selected_date='', # Needed for daily lookup form initial state
                            no_data=False, # Needed for daily lookup result display
                            courses=courses, # Needed for daily lookup form
@@ -224,7 +227,7 @@ def attendance():
     conn = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT id, name FROM courses")
+        cursor.execute(SELECT_COURSES_QUERY)
         courses = cursor.fetchall()
     except sqlite3.Error as e:
          print(f"Database error fetching courses for attendance route: {e}", file=sys.stderr)
@@ -262,7 +265,7 @@ def attendance():
             flash("Please select both a date and a course.", "warning")
             conn.close() # Close connection before returning
             # Re-render index with error message
-            return render_template('index.html',
+            return render_template(INDEX_TEMPLATE,
                                    selected_date=selected_date, # Keep value if one was provided
                                    no_data=False, # No data *yet*, but not a data-not-found scenario from search
                                    courses=courses, # Always needed for form
@@ -285,7 +288,7 @@ def attendance():
                  print(f"Course ID {course_id} not found in DB.")
                  flash(f"Invalid course selected.", "warning")
                  conn.close()
-                 return render_template('index.html', # Render index with error
+                 return render_template(INDEX_TEMPLATE, # Render index with error
                                     selected_date=selected_date, no_data=False, courses=courses, semesters=SEMESTER_DATES.keys(),
                                     student_lookup_data=None, course_attendance_details=None, no_student_data=False,
                                     overall_percentage=overall_percentage, total_students=total_students,
@@ -319,7 +322,7 @@ def attendance():
              flash(f"An error occurred fetching daily attendance: {str(e)}", "danger")
              conn.close() # Close connection before returning
              # Re-render index with error message
-             return render_template('index.html',
+             return render_template(INDEX_TEMPLATE,
                                     selected_date=selected_date, no_data=False, courses=courses, semesters=SEMESTER_DATES.keys(),
                                     student_lookup_data=None, course_attendance_details=None, no_student_data=False,
                                     overall_percentage=overall_percentage, total_students=total_students,
@@ -336,7 +339,7 @@ def attendance():
 
     # If POST was successful (even if no data found), render index with results
     print("Rendering index.html with daily report results.")
-    return render_template('index.html',
+    return render_template(INDEX_TEMPLATE,
                            selected_date=selected_date, # Pass the selected date back for display and form
                            attendance_data=attendance_data, # Pass the fetched data (or [])
                            no_data=no_data, # Pass the flag for 'no data found for criteria'
@@ -361,7 +364,7 @@ def take_attendance():
         conn = get_db()
         cursor = conn.cursor()
         try:
-            cursor.execute("SELECT id, name FROM courses")
+            cursor.execute(SELECT_COURSES_QUERY)
             courses = cursor.fetchall()
             print(f"Fetched {len(courses)} courses for take attendance page.")
         except sqlite3.Error as e:
@@ -519,16 +522,16 @@ def _validate_folder_inputs(name, roll_number):
     if not name or not roll_number:
         print("Name or Roll Number missing.")
         return jsonify({"status": "error", "message": "Name and Roll Number are required."}), 400
-    safe_name = re.sub(r'[^\w\-]+', '_', name).strip('_')
-    safe_roll = re.sub(r'[^\w\-]+', '_', roll_number).strip('_')
+    safe_name = re.sub(SANITIZE_REGEX, '_', name).strip('_')
+    safe_roll = re.sub(SANITIZE_REGEX, '_', roll_number).strip('_')
     if not safe_name or not safe_roll:
         print("Sanitized name or roll is empty after cleaning.")
         return jsonify({"status": "error", "message": "Name or Roll Number contains invalid characters."}), 400
     return None
 
 def _sanitize_inputs(name, roll_number):
-    safe_name = re.sub(r'[^\w\-]+', '_', name).strip('_')
-    safe_roll = re.sub(r'[^\w\-]+', '_', roll_number).strip('_')
+    safe_name = re.sub(SANITIZE_REGEX, '_', name).strip('_')
+    safe_roll = re.sub(SANITIZE_REGEX, '_', roll_number).strip('_')
     return safe_name, safe_roll
 
 def _check_existing_student(roll_number):
@@ -1175,7 +1178,7 @@ def student_semester_attendance():
     conn = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT id, name FROM courses")
+        cursor.execute(SELECT_COURSES_QUERY)
         courses_for_daily_lookup = cursor.fetchall()
     except sqlite3.Error as e:
         print(f"Database error fetching courses for student lookup route: {e}", file=sys.stderr)
@@ -1205,7 +1208,7 @@ def student_semester_attendance():
         flash("Please enter Roll Number and select a Semester.", "warning")
         conn.close()
         # Render index template with necessary context even on error
-        return render_template('index.html',
+        return render_template(INDEX_TEMPLATE,
                                selected_date='', # Keep other context variables for other sections of index.html
                                no_data=False, # Ensure this is False for daily report section
                                courses=courses_for_daily_lookup, # Always needed for daily form
@@ -1223,7 +1226,7 @@ def student_semester_attendance():
         flash("Invalid semester selected.", "warning")
         conn.close()
         # Render index template with necessary context even on error
-        return render_template('index.html',
+        return render_template(INDEX_TEMPLATE,
                                selected_date='',
                                no_data=False,
                                courses=courses_for_daily_lookup,
@@ -1333,7 +1336,7 @@ def student_semester_attendance():
         conn.close()
 
     print("Rendering index.html with student semester lookup results.")
-    return render_template('index.html',
+    return render_template(INDEX_TEMPLATE,
                            selected_date='', 
                            no_data=False, 
                            courses=courses_for_daily_lookup, 
