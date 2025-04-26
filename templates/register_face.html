@@ -44,6 +44,8 @@
 </div>
 
 <script>
+// Inject CSRF token from Flask into JS
+const CSRF_TOKEN = '{{ csrf_token() }}';
 document.addEventListener('DOMContentLoaded', () => {
     const video = document.getElementById('camera-feed');
     const canvas = document.getElementById('capture-canvas');
@@ -89,7 +91,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/create_folder', { // [cite: 807]
                 method: 'POST',
                 body: JSON.stringify({ name, roll_number }), // [cite: 807]
-                headers: { 'Content-Type': 'application/json' } // [cite: 807]
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': CSRF_TOKEN
+                } // [cite: 807]
             });
             const result = await response.json(); // [cite: 807]
 
@@ -141,7 +146,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/capture_image', { // [cite: 811]
                 method: 'POST',
                 // Send as form data, not JSON, matching Flask backend
-                body: new URLSearchParams(formData) // [cite: 812]
+                body: new URLSearchParams(formData), // [cite: 812]
+                headers: {
+                    'X-CSRFToken': CSRF_TOKEN
+                }
             });
             const result = await response.json(); // [cite: 812]
 

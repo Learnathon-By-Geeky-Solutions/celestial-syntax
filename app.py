@@ -477,111 +477,23 @@ def register():
     return render_template('register_face.html', logged_in_username=session.get('username')) # Pass username
 
 @app.route('/create_folder', methods=['POST'])
-@login_required # Protect folder creation
+@login_required
+
 def create_folder():
     print("--- Hit /create_folder route ---")
-    # Clear potentially stale session data from a previous attempt
-    session.pop('current_folder', None)
-    session.pop('roll_number', None)
-    session.pop('name', None)
-    session.pop('is_existing_student', None)
-
+    _clear_registration_session()
     try:
         data = request.get_json()
-        name = data.get('name')
-        roll_number = data.get('roll_number')
+        name, roll_number = data.get('name'), data.get('roll_number')
         print(f"Received name: {name}, roll_number: {roll_number}")
-
-        if not name or not roll_number:
-            print("Name or Roll Number missing.")
-            return jsonify({"status": "error", "message": "Name and Roll Number are required."}), 400
-
-        # Sanitize inputs for folder naming - remove characters not allowed or problematic in filenames
-        safe_name = re.sub(r'[^\w\-]+', '_', name).strip('_') # Allow letters, numbers, underscore, hyphen
-        safe_roll = re.sub(r'[^\w\-]+', '_', roll_number).strip('_')
-        if not safe_name or not safe_roll: # Ensure sanitized name/roll are not empty
-             print("Sanitized name or roll is empty after cleaning.")
-             return jsonify({"status": "error", "message": "Name or Roll Number contains invalid characters."}), 400
-
+        error = _validate_folder_inputs(name, roll_number)
+        if error:
+            return error
+        safe_name, safe_roll = _sanitize_inputs(name, roll_number)
         print(f"Sanitized name: {safe_name}, sanitized roll: {safe_roll}")
-
-
-        conn = get_db()
-        cursor = conn.cursor()
-
-        # Use a database check to see if this roll number is already registered
-        cursor.execute("SELECT id FROM students WHERE roll_number = ?", (roll_number,))
-        existing_student_row = cursor.fetchone()
-        conn.close() # Close DB connection as soon as possible
-
-        folder_path = None
-        is_existing_student = existing_student_row is not None
-        print(f"Is existing student? {is_existing_student}")
-
-
-        if is_existing_student:
-            flash(f"Roll Number {roll_number} found in database. Images will be saved to the existing folder for this student.", "info")
-            # If student exists, try to find their existing face image folder
-            existing_folder_for_roll = None
-            # Look for a folder pattern like 'person_*_roll_SAFE_ROLL_number_*'
-            roll_folder_pattern = re.compile(r'_roll_' + re.escape(safe_roll) + r'(_.*)?$', re.IGNORECASE)
-
-            for folder_name in os.listdir(FACE_IMAGES_DIR):
-                 full_path = os.path.join(FACE_IMAGES_DIR, folder_name)
-                 if os.path.isdir(full_path) and roll_folder_pattern.search(folder_name):
-                      existing_folder_for_roll = full_path
-                      break
-
-            if existing_folder_for_roll:
-                 folder_path = existing_folder_for_roll # Use the existing folder
-                 print(f"Roll number exists, using existing folder: {folder_path}")
-                 # Decide whether to clear existing images or add to them.
-                 # Clearing is often simpler for retraining. Let's clear existing images.
-                 try:
-                     print(f"Clearing existing images in {folder_path}")
-                     for f in os.listdir(folder_path):
-                         file_path = os.path.join(folder_path, f)
-                         if os.path.isfile(file_path):
-                             os.unlink(file_path)
-                     print("Existing images cleared.")
-                 except Exception as clear_e:
-                      print(f"Warning: Failed to clear existing images in {folder_path}: {clear_e}", file=sys.stderr)
-                      # Continue registration process but with a warning
-
-            else:
-                 # This is a weird state - roll exists but no matching folder found.
-                 # Log a warning and proceed to create a *new* folder with the next ID.
-                 print(f"Warning: Roll number {roll_number} exists but no matching folder found. Creating a new one.")
-                 flash(f"Warning: Student with Roll Number {roll_number} exists, but their face image folder was not found. Creating a new folder.", "warning")
-                 is_existing_student = False # Treat as new for folder creation purposes
-
-
-        # If no existing student OR no existing folder found for existing student
-        if folder_path is None:
-             # Find the next available person ID by inspecting existing folders
-             existing_folders = [f for f in os.listdir(FACE_IMAGES_DIR) if os.path.isdir(os.path.join(FACE_IMAGES_DIR, f)) and f.startswith("person_")]
-             person_ids = []
-             for folder in existing_folders:
-                  match = re.match(r'person_(\d+)_.*', folder)
-                  if match:
-                       person_ids.append(int(match.group(1)))
-             next_person_id = max(person_ids) + 1 if person_ids else 1
-
-             folder_name = f"person_{next_person_id}_roll_{safe_roll}_name_{safe_name}"
-             folder_path = os.path.join(FACE_IMAGES_DIR, folder_name)
-
-             os.makedirs(folder_path, exist_ok=True) # exist_ok=True is technically redundant if folder_path was None
-             print(f"Created new folder: {folder_path}")
-
-
-        # Store necessary data in session
-        session['current_folder'] = folder_path
-        session['roll_number'] = roll_number
-        session['name'] = name
-        session['is_existing_student'] = is_existing_student # Store the original status
-        print(f"Session data set: current_folder={session['current_folder']}, roll_number={session['roll_number']}, name={session['name']}, is_existing_student={session['is_existing_student']}")
-
-
+        is_existing_student = _check_existing_student(roll_number)
+        folder_path = _get_or_create_folder(is_existing_student, safe_roll, safe_name, roll_number)
+        _set_registration_session(folder_path, roll_number, name, is_existing_student)
         return jsonify({
             "status": "success",
             "message": f"Folder '{os.path.basename(folder_path)}' created/selected successfully.",
@@ -589,11 +501,93 @@ def create_folder():
         })
     except Exception as e:
         print(f"Error in /create_folder: {e}", file=sys.stderr)
-        # Robust: If folder exists or images cannot be cleared, return warning with 200
         err_str = str(e)
         if "Cannot create a file when that file already exists" in err_str or "unlink error" in err_str or "already exists" in err_str:
             return jsonify({"status": "warning", "message": f"Warning: {err_str}"}), 200
         return jsonify({"status": "error", "message": f"Server error creating folder: {err_str}"}), 500
+
+def _clear_registration_session():
+    session.pop('current_folder', None)
+    session.pop('roll_number', None)
+    session.pop('name', None)
+    session.pop('is_existing_student', None)
+
+def _validate_folder_inputs(name, roll_number):
+    if not name or not roll_number:
+        print("Name or Roll Number missing.")
+        return jsonify({"status": "error", "message": "Name and Roll Number are required."}), 400
+    safe_name = re.sub(r'[^\w\-]+', '_', name).strip('_')
+    safe_roll = re.sub(r'[^\w\-]+', '_', roll_number).strip('_')
+    if not safe_name or not safe_roll:
+        print("Sanitized name or roll is empty after cleaning.")
+        return jsonify({"status": "error", "message": "Name or Roll Number contains invalid characters."}), 400
+    return None
+
+def _sanitize_inputs(name, roll_number):
+    safe_name = re.sub(r'[^\w\-]+', '_', name).strip('_')
+    safe_roll = re.sub(r'[^\w\-]+', '_', roll_number).strip('_')
+    return safe_name, safe_roll
+
+def _check_existing_student(roll_number):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM students WHERE roll_number = ?", (roll_number,))
+    existing_student_row = cursor.fetchone()
+    conn.close()
+    is_existing_student = existing_student_row is not None
+    print(f"Is existing student? {is_existing_student}")
+    return is_existing_student
+
+def _get_or_create_folder(is_existing_student, safe_roll, safe_name, roll_number):
+    folder_path = None
+    if is_existing_student:
+        flash(f"Roll Number {roll_number} found in database. Images will be saved to the existing folder for this student.", "info")
+        folder_path = _find_and_clear_existing_folder(safe_roll)
+        if not folder_path:
+            print(f"Warning: Roll number {roll_number} exists but no matching folder found. Creating a new one.")
+            flash(f"Warning: Student with Roll Number {roll_number} exists, but their face image folder was not found. Creating a new folder.", "warning")
+            is_existing_student = False
+    if not folder_path:
+        folder_path = _create_new_folder(safe_roll, safe_name)
+    return folder_path
+
+def _find_and_clear_existing_folder(safe_roll):
+    roll_folder_pattern = re.compile(r'_roll_' + re.escape(safe_roll) + r'(_.*)?$', re.IGNORECASE)
+    for folder_name in os.listdir(FACE_IMAGES_DIR):
+        full_path = os.path.join(FACE_IMAGES_DIR, folder_name)
+        if os.path.isdir(full_path) and roll_folder_pattern.search(folder_name):
+            try:
+                print(f"Clearing existing images in {full_path}")
+                for f in os.listdir(full_path):
+                    file_path = os.path.join(full_path, f)
+                    if os.path.isfile(file_path):
+                        os.unlink(file_path)
+                print("Existing images cleared.")
+            except Exception as clear_e:
+                print(f"Warning: Failed to clear existing images in {full_path}: {clear_e}", file=sys.stderr)
+            return full_path
+    return None
+
+def _create_new_folder(safe_roll, safe_name):
+    existing_folders = [f for f in os.listdir(FACE_IMAGES_DIR) if os.path.isdir(os.path.join(FACE_IMAGES_DIR, f)) and f.startswith("person_")]
+    person_ids = []
+    for folder in existing_folders:
+        match = re.match(r'person_(\d+)_.*', folder)
+        if match:
+            person_ids.append(int(match.group(1)))
+    next_person_id = max(person_ids) + 1 if person_ids else 1
+    folder_name = f"person_{next_person_id}_roll_{safe_roll}_name_{safe_name}"
+    folder_path = os.path.join(FACE_IMAGES_DIR, folder_name)
+    os.makedirs(folder_path, exist_ok=True)
+    print(f"Created new folder: {folder_path}")
+    return folder_path
+
+def _set_registration_session(folder_path, roll_number, name, is_existing_student):
+    session['current_folder'] = folder_path
+    session['roll_number'] = roll_number
+    session['name'] = name
+    session['is_existing_student'] = is_existing_student
+    print(f"Session data set: current_folder={session['current_folder']}, roll_number={session['roll_number']}, name={session['name']}, is_existing_student={session['is_existing_student']}")
 
 @app.route('/capture_image', methods=['POST'])
 @login_required # Protect image capture
