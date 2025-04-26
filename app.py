@@ -1141,18 +1141,7 @@ def reports():
         print(f"Found {len(low_attendance_students)} students below {low_threshold}% attendance.")
 
 
-    except sqlite3.Error as e:
-        flash(f"Database error fetching reports: {e}", "danger")
-        print(f"Reports DB error: {e}", file=sys.stderr) # Log error
-        # Set default values on error
-        overall_percentage = 0
-        course_stats = []
-        attendance_trend = {'labels': [], 'percentages': [], 'present_counts': [], 'total_counts': []}
-        low_attendance_students = []
-        # Ensure dates are None if error occurs before they are set
-        if 'start_date' not in locals(): start_date = None
-        if 'end_date' not in locals(): end_date = None
-        # selected_course_name default "All Courses" is fine
+    # Removed redundant except sqlite3.Error as e: block; exception is already handled by a previous except clause.
 
     finally:
         conn.close()

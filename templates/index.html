@@ -29,6 +29,8 @@
                             <i class="fas fa-user-plus me-2"></i>Register New Face
                         </a>
                         <form action="{{ url_for('stop_attendance') }}" method="POST" class="d-grid">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-outline-danger">
                                 <i class="fas fa-stop me-2"></i>Stop Session
                             </button>
@@ -87,6 +89,8 @@
                     <div class="mb-4 border-bottom pb-3">
                         <h6 class="text-muted"><i class="fas fa-calendar-day me-2"></i>Daily Report</h6>
                         <form method="POST" action="{{ url_for('attendance') }}" class="mt-2">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <div class="row g-2">
                                 <div class="col-md-6">
                                     <label for="daily-date" class="form-label visually-hidden">Date</label>
@@ -117,6 +121,8 @@
                     <div class="mb-3">
                         <h6 class="text-muted"><i class="fas fa-user-graduate me-2"></i>Student Semester Report</h6>
                         <form method="POST" action="{{ url_for('student_semester_attendance') }}" class="mt-2">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <div class="row g-2">
                                 <div class="col-md-6">
                                     <label for="student-rollno" class="form-label visually-hidden">Roll Number</label>

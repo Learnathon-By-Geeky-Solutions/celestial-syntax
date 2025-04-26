@@ -15,6 +15,7 @@
                         <h4>Select Course for Attendance</h4>
                     </div>
                     <form action="/take_attendance" method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <select name="course_id" class="form-select form-select-lg mb-4">
                             {% for course in courses %}
                             <option value="{{ course[0] }}">{{ course[1] }}</option>
