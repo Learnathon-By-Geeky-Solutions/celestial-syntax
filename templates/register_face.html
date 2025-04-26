@@ -177,8 +177,27 @@ document.addEventListener('DOMContentLoaded', () => {
         showStatus("Finalizing registration and running feature extraction...", 'info');
         try {
             // This endpoint now only triggers the subprocess
-            const response = await fetch('/finalize_registration', { method: 'POST' }); // [cite: 814]
-            const result = await response.json(); // [cite: 814]
+            const response = await fetch('/finalize_registration', {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRFToken': CSRF_TOKEN
+                }
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                showStatus(`Finalization failed: ${errorText}`, 'danger');
+                return;
+            }
+            let result;
+            try {
+                result = await response.json();
+            } catch (e) {
+                showStatus('Invalid response from server.', 'danger');
+                console.error('Failed to parse JSON:', e);
+                return;
+            }
 
             if (result.status === 'success') {
                 showStatus(result.message, 'success'); // [cite: 814]

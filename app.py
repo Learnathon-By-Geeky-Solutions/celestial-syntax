@@ -22,7 +22,24 @@ csrf = CSRFProtect(app)
 # --- Error Handler for Database Errors ---
 @app.errorhandler(sqlite3.Error)
 def handle_db_error(error):
-    return render_template(INDEX_TEMPLATE, message="A database error occurred: {}".format(error)), 500
+    if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.accept_mimetypes['application/json'] > request.accept_mimetypes['text/html']:
+        return jsonify({"status": "error", "message": f"A database error occurred: {error}"}), 500
+    return render_template('500.html', message="A database error occurred: {}".format(error)), 500
+
+# --- Error Handler for Unauthorized (401) and Forbidden (403) ---
+@app.errorhandler(401)
+@app.errorhandler(403)
+def handle_auth_error(error):
+    if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.accept_mimetypes['application/json'] > request.accept_mimetypes['text/html']:
+        return jsonify({"status": "error", "message": "Authentication required."}), error.code if hasattr(error, 'code') else 401
+    return render_template('login.html'), error.code if hasattr(error, 'code') else 401
+
+# --- Error Handler for Internal Server Error (500) ---
+@app.errorhandler(500)
+def handle_internal_error(error):
+    if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.accept_mimetypes['application/json'] > request.accept_mimetypes['text/html']:
+        return jsonify({"status": "error", "message": "An internal server error occurred."}), 500
+    return render_template('500.html', message="An internal server error occurred."), 500
 
 app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24)) 
 
@@ -35,6 +52,8 @@ SELECT_COURSE_NAME_BY_ID_QUERY = "SELECT name FROM courses WHERE id = ?"
 SELECT_STUDENT_COUNT_QUERY = "SELECT COUNT(*) FROM students"
 INDEX_TEMPLATE = "index.html"
 SANITIZE_REGEX = r'[^\w-]+'
+REPORTS_TEMPLATE = "reports.html"
+ALL_COURSES_LABEL = "All Courses"
 SEMESTER_DATES = {
     "1.1": ("2022-03-01", "2022-08-31"),
     "1.2": ("2022-09-01", "2023-03-31"),
@@ -84,9 +103,10 @@ def login_required(view):
     @functools.wraps(view)
     def wrapped_view(**kwargs):
         if 'user_id' not in session:
+            # If AJAX/JSON request, return JSON error instead of redirect
+            if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.accept_mimetypes['application/json'] > request.accept_mimetypes['text/html']:
+                return jsonify({"status": "error", "message": "Authentication required."}), 401
             flash("Please log in to access this page.", "warning")
-            # Store the requested URL to redirect back after login (optional but good UX)
-            # session['next_url'] = request.url # Simple example, needs refinement for query strings, POST etc.
             return redirect(url_for('login'))
         return view(**kwargs)
     return wrapped_view
@@ -288,7 +308,7 @@ def attendance():
                 print(f"Found course name: {selected_course_name}")
             else:
                  print(f"Course ID {course_id} not found in DB.")
-                 flash(f"Invalid course selected.", "warning")
+                 flash("Invalid course selected.", "warning")
                  conn.close()
                  return render_template(INDEX_TEMPLATE, # Render index with error
                                     selected_date=selected_date, no_data=False, courses=courses, semesters=SEMESTER_DATES.keys(),
@@ -400,7 +420,7 @@ def take_attendance():
             print(f"Checking for script at: {script_path}")
             if not os.path.exists(script_path):
                  flash(f"Error: attendance_taker.py not found at {script_path}", "danger")
-                 print(f"Error: attendance_taker.py not found.", file=sys.stderr)
+                 print("Error: attendance_taker.py not found.", file=sys.stderr)
                  return redirect(url_for('take_attendance'))
 
             print(f"Starting facial recognition for course ID: {course_id} using {python_executable} {script_path}")
@@ -613,14 +633,14 @@ def capture_image():
         return jsonify({"status": "error", "message": "Session data missing for image capture."}), 400
 
     folder_path = session['current_folder']
-    roll_number = session['roll_number'] # Needed for potential student lookup on error
-    name = session['name'] # Needed for potential student lookup on error
+
+
 
     if not os.path.isdir(folder_path):
          flash(f"Registration folder {os.path.basename(folder_path)} not found on server. Please start registration again.", "danger")
          clear_registration_session()
          print(f"Registration folder not found: {folder_path}")
-         return jsonify({"status": "error", "message": f"Registration folder not found."}), 404
+         return jsonify({"status": "error", "message": "Registration folder not found."}), 404
 
     try:
         image_data = request.form.get('image_data')
@@ -825,7 +845,7 @@ def finalize_registration():
         print("Feature extraction completed successfully (or with warnings).")
     except FileNotFoundError:
          print(f"Python executable not found: {python_executable}", file=sys.stderr)
-         flash(f"Error: Python command not found on the server. Feature extraction failed.", "danger")
+         flash("Error: Python command not found on the server. Feature extraction failed.", "danger")
          # Don't return, just warn
     except subprocess.CalledProcessError as e:
         print(f"Feature Extraction script failed. Return code: {e.returncode}", file=sys.stderr)
@@ -866,7 +886,7 @@ def reports():
 
 
     # --- Initialize selected_course_name for display ---
-    selected_course_name = "All Courses"
+    selected_course_name = ALL_COURSES_LABEL
 
     try:
         # Fetch list of all courses for the course dropdown
@@ -955,7 +975,7 @@ def reports():
             monthly_total = row['monthly_total'] or 0
             percentage = (monthly_present / monthly_total) * 100 if monthly_total > 0 else 0
             attendance_trend['percentages'].append(round(percentage, 2))
-        print(f"Fetched attendance trend data for reports.")
+        print("Fetched attendance trend data for reports.")
 
         # --- Query for Students with Low Attendance (filters by semester AND optionally course) ---
         low_attendance_where_clauses = []
@@ -975,12 +995,12 @@ def reports():
                     print(f"Applying course filter: ID={course_id_int}, Name={selected_course_name}")
                 else:
                     selected_course_id = 'all'
-                    selected_course_name = "All Courses"
+                    selected_course_name = ALL_COURSES_LABEL
                     flash("Invalid course ID provided in parameters for filtering.", "warning")
                     print(f"Invalid course ID {course_id} provided for filtering low attendance.")
             except ValueError:
                 selected_course_id = 'all'
-                selected_course_name = "All Courses"
+                selected_course_name = ALL_COURSES_LABEL
                 flash("Invalid course ID format provided in parameters.", "warning")
                 print(f"Invalid course ID format '{selected_course_id}' provided for filtering low attendance.")
         low_attendance_where_sql = ""
@@ -1019,7 +1039,7 @@ def reports():
         print(f"Found {len(low_attendance_students)} students below {low_threshold}% attendance.")
 
         # --- Render the reports page as usual ---
-        return render_template('reports.html',
+        return render_template(REPORTS_TEMPLATE,
                               all_courses=all_courses,
                               semesters=SEMESTER_DATES.keys(),
                               selected_semester=selected_semester,
@@ -1037,7 +1057,7 @@ def reports():
         # Render a user-friendly error page but with status 200 (for test compliance)
         error_message = str(e)
         low_attendance_students = []
-        return render_template('reports.html',
+        return render_template(REPORTS_TEMPLATE,
                               all_courses=[],
                               semesters=SEMESTER_DATES.keys(),
                               selected_semester='all',
@@ -1078,14 +1098,14 @@ def reports():
                  else:
                       # Handle case where invalid course_id was passed in URL params
                       selected_course_id = 'all' # Reset to 'all'
-                      selected_course_name = "All Courses" # Reset display name
+                      selected_course_name = ALL_COURSES_LABEL # Reset display name
                       flash("Invalid course ID provided in parameters for filtering.", "warning")
                       print(f"Invalid course ID {course_id} provided for filtering low attendance.")
 
              except ValueError:
                  # Handle case where course_id param is not a valid integer and not 'all'
                  selected_course_id = 'all' # Reset to 'all'
-                 selected_course_name = "All Courses" # Reset display name
+                 selected_course_name = ALL_COURSES_LABEL # Reset display name
                  flash("Invalid course ID format provided in parameters.", "warning")
                  print(f"Invalid course ID format '{selected_course_id}' provided for filtering low attendance.")
 
@@ -1147,7 +1167,7 @@ def reports():
 
 
     print("Rendering reports.html")
-    return render_template('reports.html',
+    return render_template(REPORTS_TEMPLATE,
                            overall_percentage=round(overall_percentage, 2),
                            course_stats=course_stats,
                            attendance_trend=attendance_trend,
@@ -1172,7 +1192,7 @@ def student_semester_attendance():
     student_data = None # Data for the specific student found
     course_attendance_details = [] # List of attendance details per course
     no_student_data = False # Flag to indicate if no student or data was found (initialized to False)
-    semester_display_name = selected_semester # For displaying in the template
+
     print(f"Received student lookup: roll_number={roll_number}, semester={selected_semester}")
 
 
