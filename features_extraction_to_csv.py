@@ -24,6 +24,8 @@ face_reco_model = dlib.face_recognition_model_v1("data/data_dlib/dlib_face_recog
 
 def return_128d_features(path_img):
     img_rd = cv2.imread(path_img)
+    if img_rd is None:
+        return 0
     faces = detector(img_rd, 1)
 
     logging.info("%-40s %-20s", " Image with faces detected:", path_img)
