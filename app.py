@@ -246,139 +246,132 @@ def index():
 
 
 @app.route('/attendance', methods=['GET', 'POST'])
-@login_required # Protect the daily attendance report route
+@login_required
 def attendance():
     print("--- Hit /attendance route ---")
-
-    # Fetch data needed to re-render the index page correctly
     conn = get_db()
     cursor = conn.cursor()
+
+    courses = fetch_courses(cursor)
+    overall_percentage, total_students = fetch_dashboard_stats(cursor)
+
+    if request.method == 'GET':
+        print("GET request to /attendance, redirecting to index.")
+        conn.close()
+        return redirect(url_for('index'))
+
+    selected_date = request.form.get('selected_date')
+    course_id = request.form.get('course_id')
+    print(f"Received date: {selected_date}, course_id: {course_id} for daily lookup.")
+
+    if not selected_date or not course_id:
+        print("Missing date or course_id, flashing warning.")
+        flash("Please select both a date and a course.", "warning")
+        conn.close()
+        return render_attendance_error(selected_date, courses, overall_percentage, total_students)
+
+    selected_course_name = fetch_course_name(cursor, course_id)
+    if selected_course_name is None:
+        print(f"Course ID {course_id} not found in DB.")
+        flash("Invalid course selected.", "warning")
+        conn.close()
+        return render_attendance_error(selected_date, courses, overall_percentage, total_students)
+
+    try:
+        attendance_data = fetch_attendance_data(cursor, selected_date, course_id)
+        if not attendance_data:
+            print("No attendance data found for criteria, setting no_data = True")
+            flash(f"No attendance data found for {selected_course_name} on {selected_date}.", "info")
+            no_data = True
+        else:
+            print("Attendance data found.")
+            no_data = False
+    except Exception as e:
+        print(f"An error occurred during daily attendance fetch: {str(e)}", file=sys.stderr)
+        flash(f"An error occurred fetching daily attendance: {str(e)}", "danger")
+        conn.close()
+        return render_attendance_error(selected_date, courses, overall_percentage, total_students)
+    finally:
+        conn.close()
+
+    print("Rendering index.html with daily report results.")
+    return render_template(
+        INDEX_TEMPLATE,
+        selected_date=selected_date,
+        attendance_data=attendance_data,
+        no_data=no_data,
+        courses=courses,
+        selected_course_name=selected_course_name,
+        semesters=SEMESTER_DATES.keys(),
+        student_lookup_data=None,
+        course_attendance_details=None,
+        no_student_data=False,
+        overall_percentage=overall_percentage,
+        total_students=total_students,
+        logged_in_username=session.get('username')
+    )
+
+
+def fetch_courses(cursor):
     try:
         cursor.execute(SELECT_COURSES_QUERY)
-        courses = cursor.fetchall()
+        return cursor.fetchall()
     except sqlite3.Error as e:
-         print(f"Database error fetching courses for attendance route: {e}", file=sys.stderr)
-         courses = []
+        print(f"Database error fetching courses for attendance route: {e}", file=sys.stderr)
+        return []
 
-    # Fetch dashboard stats (needed when re-rendering index.html)
-    overall_percentage = 0
-    total_students = 0
+def fetch_dashboard_stats(cursor):
     try:
         cursor.execute(ATTENDANCE_SUMMARY_QUERY)
         overall_res = cursor.fetchone()
         overall_present = overall_res[0] if overall_res and overall_res[0] is not None else 0
         overall_total = overall_res[1] if overall_res and overall_res[1] is not None else 0
         overall_percentage = round((overall_present / overall_total) * 100, 1) if overall_total > 0 else 0
-
         cursor.execute(SELECT_STUDENT_COUNT_QUERY)
         students_res = cursor.fetchone()
         total_students = students_res[0] if students_res and students_res[0] is not None else 0
+        return overall_percentage, total_students
     except Exception as e:
         print(f"Dashboard stats error in attendance route: {e}", file=sys.stderr)
-    # --- End dashboard stats block ---
+        return 0, 0
 
-    attendance_data = None
-    selected_date = None
-    no_data = False
-    selected_course_name = None # To display course name in header
+def fetch_course_name(cursor, course_id):
+    cursor.execute(SELECT_COURSE_NAME_BY_ID_QUERY, (course_id,))
+    course_res = cursor.fetchone()
+    if course_res:
+        print(f"Found course name: {course_res['name']}")
+        return course_res['name']
+    return None
 
-    if request.method == 'POST':
-        selected_date = request.form.get('selected_date')
-        course_id = request.form.get('course_id')
-        print(f"Received date: {selected_date}, course_id: {course_id} for daily lookup.")
+def fetch_attendance_data(cursor, selected_date, course_id):
+    print(f"Executing query for date {selected_date}, course ID {course_id}")
+    cursor.execute("""
+        SELECT s.roll_number, s.name, c.name as course_name, a.present
+        FROM attendance a
+        JOIN students s ON a.student_id = s.id
+        JOIN courses c ON a.course_id = c.id
+        WHERE a.date = ? AND a.course_id = ?
+        ORDER BY s.roll_number
+    """, (selected_date, course_id))
+    data = cursor.fetchall()
+    print(f"Query returned {len(data) if data is not None else 0} records.")
+    return data
 
-        if not selected_date or not course_id:
-            print("Missing date or course_id, flashing warning.")
-            flash("Please select both a date and a course.", "warning")
-            conn.close() # Close connection before returning
-            # Re-render index with error message
-            return render_template(INDEX_TEMPLATE,
-                                   selected_date=selected_date, # Keep value if one was provided
-                                   no_data=False, # No data *yet*, but not a data-not-found scenario from search
-                                   courses=courses, # Always needed for form
-                                   semesters=SEMESTER_DATES.keys(), # Always needed for other form
-                                   student_lookup_data=None, # Ensure these are None for this view
-                                   course_attendance_details=None,
-                                   no_student_data=False,
-                                   overall_percentage=overall_percentage, total_students=total_students, # Always needed
-                                   logged_in_username=session.get('username'))
+def render_attendance_error(selected_date, courses, overall_percentage, total_students):
+    return render_template(
+        INDEX_TEMPLATE,
+        selected_date=selected_date,
+        no_data=False,
+        courses=courses,
+        semesters=SEMESTER_DATES.keys(),
+        student_lookup_data=None,
+        course_attendance_details=None,
+        no_student_data=False,
+        overall_percentage=overall_percentage,
+        total_students=total_students,
+        logged_in_username=session.get('username')
+    )
 
-
-        try:
-            # Fetch course name
-            cursor.execute(SELECT_COURSE_NAME_BY_ID_QUERY, (course_id,))
-            course_res = cursor.fetchone()
-            if course_res:
-                selected_course_name = course_res['name']
-                print(f"Found course name: {selected_course_name}")
-            else:
-                 print(f"Course ID {course_id} not found in DB.")
-                 flash("Invalid course selected.", "warning")
-                 conn.close()
-                 return render_template(INDEX_TEMPLATE, # Render index with error
-                                    selected_date=selected_date, no_data=False, courses=courses, semesters=SEMESTER_DATES.keys(),
-                                    student_lookup_data=None, course_attendance_details=None, no_student_data=False,
-                                    overall_percentage=overall_percentage, total_students=total_students,
-                                    logged_in_username=session.get('username'))
-
-
-            # Fetch attendance data
-            print(f"Executing query for date {selected_date}, course ID {course_id}")
-            cursor.execute("""
-                SELECT s.roll_number, s.name, c.name as course_name, a.present
-                FROM attendance a
-                JOIN students s ON a.student_id = s.id
-                JOIN courses c ON a.course_id = c.id
-                WHERE a.date = ? AND a.course_id = ?
-                ORDER BY s.roll_number
-                """, (selected_date, course_id))
-            attendance_data = cursor.fetchall()
-            print(f"Query returned {len(attendance_data) if attendance_data is not None else 0} records.")
-
-            if not attendance_data:
-                no_data = True
-                print("No attendance data found for criteria, setting no_data = True")
-                flash(f"No attendance data found for {selected_course_name} on {selected_date}.", "info")
-            else:
-                no_data = False # Ensure this is False if data is found
-                print("Attendance data found.")
-
-
-        except Exception as e:
-             print(f"An error occurred during daily attendance fetch: {str(e)}", file=sys.stderr)
-             flash(f"An error occurred fetching daily attendance: {str(e)}", "danger")
-             conn.close() # Close connection before returning
-             # Re-render index with error message
-             return render_template(INDEX_TEMPLATE,
-                                    selected_date=selected_date, no_data=False, courses=courses, semesters=SEMESTER_DATES.keys(),
-                                    student_lookup_data=None, course_attendance_details=None, no_student_data=False,
-                                    overall_percentage=overall_percentage, total_students=total_students,
-                                    logged_in_username=session.get('username'))
-        finally:
-             conn.close() # Ensure connection is closed
-
-    # This route is intended to be accessed via POST from index.
-    # If a GET request somehow reaches here, redirect to index.
-    # This prevents directly accessing /attendance and getting an empty page with POST logic errors.
-    if request.method == 'GET':
-         print("GET request to /attendance, redirecting to index.")
-         return redirect(url_for('index'))
-
-    # If POST was successful (even if no data found), render index with results
-    print("Rendering index.html with daily report results.")
-    return render_template(INDEX_TEMPLATE,
-                           selected_date=selected_date, # Pass the selected date back for display and form
-                           attendance_data=attendance_data, # Pass the fetched data (or [])
-                           no_data=no_data, # Pass the flag for 'no data found for criteria'
-                           courses=courses, # Always pass courses for the form
-                           selected_course_name=selected_course_name, # Pass the name for display
-                           semesters=SEMESTER_DATES.keys(), # Always pass semesters for other form
-                           student_lookup_data=None, # Ensure these are None for daily report view
-                           course_attendance_details=None,
-                           no_student_data=False,
-                           overall_percentage=overall_percentage, # Pass dashboard stats
-                           total_students=total_students,
-                           logged_in_username=session.get('username'))
 
 
 @app.route('/take_attendance', methods=['GET', 'POST'])
@@ -747,132 +740,121 @@ def capture_image():
 
 
 @app.route('/finalize_registration', methods=['POST'])
-@login_required # Protect finalization
+@login_required
 def finalize_registration():
     print("--- Hit /finalize_registration route ---")
-    # Check if required session data exists
+    # Validate session
+    valid, session_data_or_resp = validate_registration_session()
+    if not valid:
+        return session_data_or_resp
+    roll_number, name, folder_path, is_existing_student = session_data_or_resp
+
+    # Check for images
+    valid, image_resp = check_images_for_finalization(folder_path)
+    if not valid:
+        return image_resp
+
+    # Insert or update student
+    db_success, db_resp = insert_or_update_student(roll_number, name, is_existing_student)
+    if not db_success:
+        return db_resp
+
+    # Feature extraction
+    run_feature_extraction()
+
+    # Cleanup session
+    cleanup_registration_session()
+    print("Session data cleared after finalization.")
+
+    return jsonify({"status": "success", "message": "Registration finalized."})
+
+
+def validate_registration_session():
     if not registration_session_valid():
         flash("Session expired or registration not started. Please start registration over.", "danger")
         clear_registration_session()
         print("Session data missing for finalization.")
-        return jsonify({"status": "error", "message": "Session data missing for finalization."}), 400 # Use JSON for AJAX response
-
+        return False, jsonify({"status": "error", "message": "Session data missing for finalization."}), 400
     roll_number = session['roll_number']
     name = session['name']
     folder_path = session['current_folder']
-    is_existing_student = session.get('is_existing_student', False) # Get the flag
+    is_existing_student = session.get('is_existing_student', False)
     print(f"Finalizing registration for roll: {roll_number}, name: {name}, folder: {folder_path}, existing: {is_existing_student}")
+    return True, (roll_number, name, folder_path, is_existing_student)
 
-    # Basic check if images were actually saved
-    image_files = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f)) and f.lower().endswith(('.jpg', '.jpeg', '.png'))] # Check common image extensions
+def check_images_for_finalization(folder_path):
+    image_files = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f)) and f.lower().endswith(('.jpg', '.jpeg', '.png'))]
     if not image_files:
         flash(f"No face images were successfully saved in the folder '{os.path.basename(folder_path)}'. Please capture images before finalizing.", "warning")
         print(f"No images found in folder {folder_path} for finalization.")
-         # Don't clear session data yet, allow user to capture more images
-        return jsonify({"status": "error", "message": "No images saved for this registration."}), 400
+        return False, jsonify({"status": "error", "message": "No images saved for this registration."}), 400
+    return True, None
 
-
+def insert_or_update_student(roll_number, name, is_existing_student):
     conn = None
     try:
         conn = get_db()
         cursor = conn.cursor()
-
         if not is_existing_student:
-            # Insert new student if they don't exist
             print(f"Attempting to insert new student: {roll_number}, {name}")
-            # Check one last time for concurrency issues, though less likely with session check
             cursor.execute("SELECT id FROM students WHERE roll_number = ?", (roll_number,))
             existing_student_check = cursor.fetchone()
             if existing_student_check:
-                 flash(f"Roll Number {roll_number} already exists in the database.", "danger")
-                 if conn: conn.rollback()
-                 # Keep folder/images for potential manual fixing
-                 # Clear session anyway as DB state conflicts
-                 session.pop('current_folder', None)
-                 session.pop('roll_number', None)
-                 session.pop('name', None)
-                 session.pop('is_existing_student', None)
-                 print(f"Concurrency error: Roll number {roll_number} found during finalization insert.")
-                 return jsonify({"status": "error", "message": f"Roll Number {roll_number} already exists."}), 500
-
-            cursor.execute("""
-                INSERT INTO students (roll_number, name) VALUES (?, ?)
-            """, (roll_number, name))
+                flash(f"Roll Number {roll_number} already exists in the database.", "danger")
+                if conn: conn.rollback()
+                cleanup_registration_session()
+                print(f"Concurrency error: Roll number {roll_number} found during finalization insert.")
+                return False, jsonify({"status": "error", "message": f"Roll Number {roll_number} already exists."}), 500
+            cursor.execute("INSERT INTO students (roll_number, name) VALUES (?, ?)", (roll_number, name))
             conn.commit()
             print(f"Successfully inserted student {roll_number}.")
         else:
-            # If existing, ensure the name is up-to-date (optional but good practice)
             print(f"Updating existing student name for {roll_number} to {name}")
-            cursor.execute("""
-                UPDATE students SET name = ? WHERE roll_number = ?
-            """, (name, roll_number))
+            cursor.execute("UPDATE students SET name = ? WHERE roll_number = ?", (name, roll_number))
             conn.commit()
             print(f"Successfully updated student {roll_number}.")
-
-
+        return True, None
     except sqlite3.Error as db_err:
         print(f"Database error saving student during finalization: {db_err}", file=sys.stderr)
         flash(f"Database error occurred during student save: {db_err}", "danger")
-        if conn: conn.rollback() # Rollback on error
-        # Keep folder/images for potential manual fixing
-        # Clear session anyway
-        session.pop('current_folder', None)
-        session.pop('roll_number', None)
-        session.pop('name', None)
-        session.pop('is_existing_student', None)
-        return jsonify({"status": "error", "message": "Database error saving student data."}), 500
+        if conn: conn.rollback()
+        cleanup_registration_session()
+        return False, jsonify({"status": "error", "message": "Database error saving student data."}), 500
     finally:
         if conn: conn.close()
 
-
-    # --- Run Feature Extraction ---
-    # This script reads all face image folders and updates the features_all.csv file
+def run_feature_extraction():
     script_path = os.path.join(os.path.dirname(__file__), 'features_extraction_to_csv.py')
     print(f"Checking for feature extraction script at: {script_path}")
     if not os.path.exists(script_path):
-         print(f"Feature extraction script not found at: {script_path}", file=sys.stderr)
-         flash("Feature extraction script not found on the server.", "danger")
-         # Don't return here, still clear session, but the user is warned
-         # return jsonify({"status": "error", "message": f"Script '{script_path}' not found."}), 500
-
+        print(f"Feature extraction script not found at: {script_path}", file=sys.stderr)
+        flash("Feature extraction script not found on the server.", "danger")
+        return
     try:
         python_executable = sys.executable
         print(f"Running feature extraction: {python_executable} {script_path}")
-        # Run in app.py's directory to ensure relative paths in the script work
-        result = subprocess.run([python_executable, script_path], check=True, capture_output=True, text=True, cwd=os.path.dirname(__file__), encoding='utf-8') # Specify encoding
+        result = subprocess.run([python_executable, script_path], check=True, capture_output=True, text=True, cwd=os.path.dirname(__file__), encoding='utf-8')
         print(f"Feature Extraction stdout:\n{result.stdout}")
         if result.stderr:
-             print(f"Feature Extraction stderr:\n{result.stderr}", file=sys.stderr)
-             # Decide if stderr should be an error or just a warning
-             # flash(f"Feature extraction reported errors/warnings: {result.stderr[:200]}...", "warning") # Optional flash
-
+            print(f"Feature Extraction stderr:\n{result.stderr}", file=sys.stderr)
         flash("Registration complete! Student data saved and face features updated.", "success")
         print("Feature extraction completed successfully (or with warnings).")
     except FileNotFoundError:
-         print(f"Python executable not found: {python_executable}", file=sys.stderr)
-         flash("Error: Python command not found on the server. Feature extraction failed.", "danger")
-         # Don't return, just warn
+        print(f"Python executable not found: {python_executable}", file=sys.stderr)
+        flash("Error: Python command not found on the server. Feature extraction failed.", "danger")
     except subprocess.CalledProcessError as e:
         print(f"Feature Extraction script failed. Return code: {e.returncode}", file=sys.stderr)
         print(f"Feature Extraction error output:\n{e.stderr}", file=sys.stderr)
         flash("Feature extraction script failed. See server logs for details.", "danger")
-        # Don't return, just warn
     except Exception as e:
-         print(f"Unexpected error running feature extraction: {e}", file=sys.stderr)
-         flash(f"An unexpected error occurred running feature extraction: {str(e)}", "danger")
+        print(f"Unexpected error running feature extraction: {e}", file=sys.stderr)
+        flash(f"An unexpected error occurred running feature extraction: {str(e)}", "danger")
 
-
-    # --- Cleanup Session ---
+def cleanup_registration_session():
     session.pop('current_folder', None)
     session.pop('roll_number', None)
     session.pop('name', None)
     session.pop('is_existing_student', None)
-    print("Session data cleared after finalization.")
-
-
-    # Return success even if feature extraction warned, as the core registration finished.
-    # Critical errors during extraction are flashed.
-    return jsonify({"status": "success", "message": "Registration finalized."})
 
 
 # --- UPDATED Reporting and Analytics Route ---
