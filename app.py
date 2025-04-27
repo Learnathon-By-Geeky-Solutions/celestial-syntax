@@ -1170,109 +1170,183 @@ def reports():
                            logged_in_username=session.get('username')) # Pass user info for display
 
 
-@app.route('/student_semester_attendance', methods=['POST'])
-@login_required # Protect student lookup
-def student_semester_attendance():
-    print("--- Hit /student_semester_attendance route ---")
+def render_student_lookup_page(courses_for_daily_lookup, overall_percentage, total_students,
+                               student_data=None, course_details=None, no_student_data=False,
+                               selected_roll='', selected_semester=''):
+    """Renders the index.html template with student lookup results."""
+    print("Rendering index.html with student semester lookup results.")
+    return render_template(
+        INDEX_TEMPLATE,
+        selected_date='', # For daily lookup part
+        no_data=False, # For daily lookup part
+        courses=courses_for_daily_lookup,
+        semesters=SEMESTER_DATES.keys(),
+        student_lookup_data=student_data,
+        course_attendance_details=course_details if course_details is not None else [],
+        no_student_data=no_student_data,
+        overall_percentage=overall_percentage,
+        total_students=total_students,
+        logged_in_username=session.get('username'),
+        # Pass back form selections for persistence
+        lookup_roll_number=selected_roll,
+        lookup_semester=selected_semester
+    )
 
-    roll_number = request.form.get('roll_number')
-    selected_semester = request.form.get('semester')
+# --- Helper function to process student attendance data ---
+def process_student_attendance_for_semester(cursor, roll_number, selected_semester):
+    """Fetches and processes attendance data for a student in a given semester."""
     student_data = None
     course_attendance_details = []
     no_student_data = False
+    error_message = None # To capture specific errors
 
-    conn = get_db()
-    cursor = conn.cursor()
-
-    # Fetch data needed to re-render the index page correctly (courses, semesters, stats)
-    courses_for_daily_lookup = fetch_courses_for_lookup(cursor)
-    overall_percentage, total_students = fetch_dashboard_stats(cursor)
-
-    # Validate input
-    valid, error_msg = validate_student_lookup_input(roll_number, selected_semester)
-    if not valid:
-        print(f"Input validation failed: {error_msg}")
-        flash(error_msg, "warning")
-        conn.close()
-        return render_template(
-            INDEX_TEMPLATE,
-            selected_date='',
-            no_data=False,
-            courses=courses_for_daily_lookup,
-            semesters=SEMESTER_DATES.keys(),
-            student_lookup_data=None,
-            course_attendance_details=[],
-            no_student_data=True,
-            overall_percentage=overall_percentage,
-            total_students=total_students,
-            logged_in_username=session.get('username')
-        )
+    # 1. Validate Semester and Get Dates
+    if selected_semester not in SEMESTER_DATES:
+        return None, [], True, "Invalid semester selected." # Return error message
 
     start_date, end_date = SEMESTER_DATES[selected_semester]
     print(f"Semester dates for {selected_semester}: {start_date} to {end_date}")
 
+    # 2. Fetch Student
+    student_res = fetch_student_by_roll(cursor, roll_number)
+    if not student_res:
+        print(f"No student found with Roll Number: {roll_number}")
+        return None, [], True, f"No student found with Roll Number: {roll_number}" # Return error message
+
+    student_id = student_res['id']
+    student_name = student_res['name']
+    student_data = {'roll_number': roll_number, 'name': student_name, 'semester': selected_semester}
+    print(f"Found student: {student_name} (ID: {student_id})")
+
+    # 3. Fetch Courses with Sessions in Semester
+    all_semester_courses = fetch_courses_in_semester(cursor, start_date, end_date)
+    print(f"Found {len(all_semester_courses)} courses with sessions in semester {selected_semester}.")
+    if not all_semester_courses:
+        # Student exists, but no classes were held in this semester for *any* course.
+        # It's still valid data, just nothing to show attendance for.
+        print("No classes recorded in this semester for any course.")
+        # We don't set no_student_data=True here, because the student *was* found.
+        # We return the student data but empty course details.
+        # A specific message might be flashed later.
+        return student_data, [], False, f"No classes were recorded for any course during semester {selected_semester}."
+
+
+    # 4. Calculate Attendance for Each Course
+    has_records_for_student = False
+    for course in all_semester_courses:
+        course_id = course['id']
+        course_name = course['name']
+        print(f"Calculating attendance for course: {course_name}")
+        total_classes_held, total_present, total_absent = fetch_attendance_counts(
+            cursor, student_id, course_id, start_date, end_date)
+        print(f" - Total classes held: {total_classes_held}")
+        print(f" - Classes attended: {total_present}")
+        print(f" - Classes absent: {total_absent}")
+
+        # Only add details if classes were actually held for this course in the semester
+        if total_classes_held > 0:
+            percentage = (total_present / total_classes_held) * 100 if total_classes_held > 0 else 0
+            print(f" - Percentage: {round(percentage, 2)}%")
+            course_attendance_details.append({
+                'course_name': course_name,
+                'total_classes': total_classes_held,
+                'classes_attended': total_present,
+                'classes_absent': total_absent,
+                'percentage': round(percentage, 2)
+            })
+            # Check if there was at least one record (present or absent) for *this* student
+            if total_present > 0 or total_absent > 0:
+                 has_records_for_student = True
+
+    # 5. Check if Student Found but No Attendance Records for *Them*
+    if not has_records_for_student and all_semester_courses:
+         # Student exists, courses had sessions, but this student has 0 records in those sessions.
+         print("Student found, but no attendance records in this semester/course.")
+         # We still return student data and empty course details, maybe flash a message later.
+         error_message = f"No attendance records found for {student_name} ({roll_number}) in any course within semester {selected_semester}."
+         # Setting no_student_data=True might be confusing as the student *was* found.
+         # It's better to show the student info and an empty table with a message.
+
+    return student_data, course_attendance_details, False, error_message # Return False for no_student_data if student was found
+
+
+@app.route('/student_semester_attendance', methods=['POST'])
+@login_required # Protect student lookup
+def student_semester_attendance():
+    print("--- Hit /student_semester_attendance route ---")
+    roll_number = request.form.get('roll_number')
+    selected_semester = request.form.get('semester')
+
+    # Initialize variables for template rendering
+    student_data = None
+    course_attendance_details = []
+    no_student_data = False # Flag specifically for "student not found" or major error
+
+    conn = None # Initialize conn to None
+    courses_for_daily_lookup = []
+    overall_percentage = 0
+    total_students = 0
+
     try:
-        student_res = fetch_student_by_roll(cursor, roll_number)
-        if not student_res:
-            no_student_data = True
-            print(f"No student found with Roll Number: {roll_number}")
-            flash(f"No student found with Roll Number: {roll_number}", "info")
-        else:
-            student_id = student_res['id']
-            student_name = student_res['name']
-            student_data = {'roll_number': roll_number, 'name': student_name, 'semester': selected_semester}
-            print(f"Found student: {student_name} (ID: {student_id})")
-            all_semester_courses = fetch_courses_in_semester(cursor, start_date, end_date)
-            print(f"Found {len(all_semester_courses)} courses with sessions in semester {selected_semester}.")
-            if not all_semester_courses:
-                flash(f"No classes recorded for any course in semester {selected_semester}.", "info")
-                no_student_data = True
-                print("No classes recorded in this semester for any course.")
+        conn = get_db()
+        cursor = conn.cursor()
+
+        # Fetch data needed for the page regardless of lookup result
+        courses_for_daily_lookup = fetch_courses_for_lookup(cursor)
+        overall_percentage, total_students = fetch_dashboard_stats_for_lookup(cursor) # Use renamed helper
+
+        # 1. Validate Input (using existing helper)
+        valid, error_msg = validate_student_lookup_input(roll_number, selected_semester)
+        if not valid:
+            print(f"Input validation failed: {error_msg}")
+            flash(error_msg, "warning")
+            # Render the page with the error message, preserving input if possible
+            return render_student_lookup_page(
+                courses_for_daily_lookup, overall_percentage, total_students,
+                no_student_data=True, # Indicate lookup failed due to input
+                selected_roll=roll_number, selected_semester=selected_semester
+            )
+
+        # 2. Process Attendance Data using the new helper function
+        student_data, course_attendance_details, no_student_data, message = process_student_attendance_for_semester(
+            cursor, roll_number, selected_semester
+        )
+
+        # 3. Flash appropriate message based on processing results
+        if message:
+            if no_student_data: # This means student wasn't found or semester was invalid
+                flash(message, "info")
             else:
-                for course in all_semester_courses:
-                    course_id = course['id']
-                    course_name = course['name']
-                    print(f"Calculating attendance for course: {course_name}")
-                    total_classes_held, total_present, total_absent = fetch_attendance_counts(
-                        cursor, student_id, course_id, start_date, end_date)
-                    print(f" - Total classes held: {total_classes_held}")
-                    print(f" - Classes attended: {total_present}")
-                    print(f" - Classes absent: {total_absent}")
-                    percentage = (total_present / total_classes_held) * 100 if total_classes_held > 0 else 0
-                    print(f" - Percentage: {round(percentage, 2)}%")
-                    if total_classes_held > 0:
-                        course_attendance_details.append({
-                            'course_name': course_name,
-                            'total_classes': total_classes_held,
-                            'classes_attended': total_present,
-                            'classes_absent': total_absent,
-                            'percentage': round(percentage, 2)
-                        })
-                if student_res and not course_attendance_details:
-                    flash(f"No attendance records found for {student_name} ({roll_number}) in any course within semester {selected_semester}.", "info")
-                    no_student_data = True
-                    print("Student found, but no attendance records in this semester/course.")
+                # Student was found, but maybe no classes or no records for them
+                 flash(message, "info")
+
+
     except sqlite3.Error as e:
         flash(f"Database error occurred during student semester lookup: {e}", "danger")
         print(f"Student Lookup DB error: {e}", file=sys.stderr)
+        no_student_data = True # Indicate a major error prevented lookup
+        student_data = None # Clear any partial data
+        course_attendance_details = []
+    except Exception as e: # Catch unexpected errors
+        flash(f"An unexpected error occurred: {e}", "danger")
+        print(f"Unexpected error in student lookup: {e}", file=sys.stderr)
         no_student_data = True
+        student_data = None
+        course_attendance_details = []
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
-    print("Rendering index.html with student semester lookup results.")
-    return render_template(
-        INDEX_TEMPLATE,
-        selected_date='',
-        no_data=False,
-        courses=courses_for_daily_lookup,
-        semesters=SEMESTER_DATES.keys(),
-        student_lookup_data=student_data,
-        course_attendance_details=course_attendance_details,
-        no_student_data=no_student_data,
-        overall_percentage=overall_percentage,
-        total_students=total_students,
-        logged_in_username=session.get('username')
+    # 4. Render the page with the results
+    return render_student_lookup_page(
+        courses_for_daily_lookup, overall_percentage, total_students,
+        student_data=student_data,
+        course_details=course_attendance_details,
+        no_student_data=no_student_data, # Pass the final flag
+        selected_roll=roll_number, # Preserve form selection
+        selected_semester=selected_semester
     )
+
 
 
 # --- Helper functions for student_semester_attendance ---
@@ -1284,7 +1358,7 @@ def fetch_courses_for_lookup(cursor):
         print(f"Database error fetching courses for student lookup route: {e}", file=sys.stderr)
         return []
 
-def fetch_dashboard_stats(cursor):
+def fetch_dashboard_stats_for_lookup(cursor):
     overall_percentage = 0
     total_students = 0
     try:
