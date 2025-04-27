@@ -1314,11 +1314,11 @@ def student_semester_attendance():
 
         # 3. Flash appropriate message based on processing results
         if message:
-            if no_student_data: # This means student wasn't found or semester was invalid
-                flash(message, "info")
+            if no_student_data:  # This means student wasn't found or semester was invalid
+                flash(f"Lookup failed: {message}", "info")
             else:
                 # Student was found, but maybe no classes or no records for them
-                 flash(message, "info")
+                flash(f"Note: {message} (student found, but no attendance records)", "warning")
 
 
     except sqlite3.Error as e:
