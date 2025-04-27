@@ -1,3 +1,23 @@
 [phases.setup]
-nixPkgs = ["cmake", "gcc", "gnumake", "pkg-config", "python3", "python3Packages.pip", "libGL"]
-
+nixPkgs = [
+  "cmake",
+  "gcc",
+  "gnumake",
+  "pkg-config",
+  "python3",
+  "python3Packages.pip",
+  "libGL",
+  "libGLU",
+  "libSM",
+  "libICE",
+  "libXrender",
+  "libXext",
+  "libX11",
+  "libxcb",
+  "libXi",
+  "libXt",
+  "libXfixes",
+  "libXau",
+  "libXdmcp",
+  "libuuid"
+]
