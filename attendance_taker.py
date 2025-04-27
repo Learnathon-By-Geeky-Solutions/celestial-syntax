@@ -254,45 +254,52 @@ class Face_Recognizer:
         if self.current_frame_face_cnt == 0:
             logging.debug("  / No faces in this frame!!!")
             self.current_frame_face_name_list = []
-        else:
-            logging.debug("  scene 2.2  Get faces in this frame and do face recognition")
-            self.current_frame_face_name_list = []
-            for i in range(len(faces)):
-                shape = predictor(img_rd, faces[i])
-                self.current_frame_face_feature_list.append(
-                    face_reco_model.compute_face_descriptor(img_rd, shape))
-                self.current_frame_face_name_list.append("unknown")
-            for k in range(len(faces)):
-                logging.debug("  For face %d in current frame:", k + 1)
-                self.current_frame_face_centroid_list.append([
-                    int(faces[k].left() + faces[k].right()) / 2,
-                    int(faces[k].top() + faces[k].bottom()) / 2
-                ])
-                self.current_frame_face_X_e_distance_list = []
-                self.current_frame_face_position_list.append(tuple([
-                    faces[k].left(), int(faces[k].bottom() + (faces[k].bottom() - faces[k].top()) / 4)
-                ]))
-                for i in range(len(self.face_features_known_list)):
-                    if str(self.face_features_known_list[i][0]) != '0.0':
-                        e_distance_tmp = self.return_euclidean_distance(
-                            self.current_frame_face_feature_list[k],
-                            self.face_features_known_list[i])
-                        logging.debug("      with person %d, the e-distance: %f", i + 1, e_distance_tmp)
-                        self.current_frame_face_X_e_distance_list.append(e_distance_tmp)
-                    else:
-                        self.current_frame_face_X_e_distance_list.append(999999999)
-                similar_person_num = self.current_frame_face_X_e_distance_list.index(
-                    min(self.current_frame_face_X_e_distance_list))
-                if min(self.current_frame_face_X_e_distance_list) < 0.4:
-                    recognized_roll = self.face_roll_number_known_list[similar_person_num]
-                    recognized_name = self.face_name_known_list[similar_person_num]
-                    logging.debug("Recognized roll: %s", recognized_roll)
-                    self.current_frame_face_name_list[k] = recognized_name
-                    self.attendance(recognized_roll)
-                else:
-                    logging.debug("Unknown person")
-            self.draw_note(img_rd)
+            return img_rd
+
+        logging.debug("  scene 2.2  Get faces in this frame and do face recognition")
+        self.current_frame_face_name_list = []
+        self._extract_face_features_and_names(img_rd, faces)
+        self._recognize_faces_and_update_attendance(img_rd, faces)
+        self.draw_note(img_rd)
         return img_rd
+
+    def _extract_face_features_and_names(self, img_rd, faces):
+        for i in range(len(faces)):
+            shape = predictor(img_rd, faces[i])
+            self.current_frame_face_feature_list.append(
+                face_reco_model.compute_face_descriptor(img_rd, shape))
+            self.current_frame_face_name_list.append("unknown")
+
+    def _recognize_faces_and_update_attendance(self, img_rd, faces):
+        for k in range(len(faces)):
+            logging.debug("  For face %d in current frame:", k + 1)
+            self.current_frame_face_centroid_list.append([
+                int(faces[k].left() + faces[k].right()) / 2,
+                int(faces[k].top() + faces[k].bottom()) / 2
+            ])
+            self.current_frame_face_X_e_distance_list = []
+            self.current_frame_face_position_list.append(tuple([
+                faces[k].left(), int(faces[k].bottom() + (faces[k].bottom() - faces[k].top()) / 4)
+            ]))
+            for i in range(len(self.face_features_known_list)):
+                if str(self.face_features_known_list[i][0]) != '0.0':
+                    e_distance_tmp = self.return_euclidean_distance(
+                        self.current_frame_face_feature_list[k],
+                        self.face_features_known_list[i])
+                    logging.debug("      with person %d, the e-distance: %f", i + 1, e_distance_tmp)
+                    self.current_frame_face_X_e_distance_list.append(e_distance_tmp)
+                else:
+                    self.current_frame_face_X_e_distance_list.append(999999999)
+            similar_person_num = self.current_frame_face_X_e_distance_list.index(
+                min(self.current_frame_face_X_e_distance_list))
+            if min(self.current_frame_face_X_e_distance_list) < 0.4:
+                recognized_roll = self.face_roll_number_known_list[similar_person_num]
+                recognized_name = self.face_name_known_list[similar_person_num]
+                logging.debug("Recognized roll: %s", recognized_roll)
+                self.current_frame_face_name_list[k] = recognized_name
+                self.attendance(recognized_roll)
+            else:
+                logging.debug("Unknown person")
 
     def run(self):
         cap = cv2.VideoCapture(0)             
