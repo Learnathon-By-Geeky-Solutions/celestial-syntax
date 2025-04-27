@@ -774,7 +774,7 @@ def validate_registration_session():
         flash("Session expired or registration not started. Please start registration over.", "danger")
         clear_registration_session()
         print("Session data missing for finalization.")
-        return False, jsonify({"status": "error", "message": "Session data missing for finalization."}), 400
+        return False, (jsonify({"status": "error", "message": "Session data missing for finalization."}), 400)
     roll_number = session['roll_number']
     name = session['name']
     folder_path = session['current_folder']
@@ -787,7 +787,7 @@ def check_images_for_finalization(folder_path):
     if not image_files:
         flash(f"No face images were successfully saved in the folder '{os.path.basename(folder_path)}'. Please capture images before finalizing.", "warning")
         print(f"No images found in folder {folder_path} for finalization.")
-        return False, jsonify({"status": "error", "message": "No images saved for this registration."}), 400
+        return False, (jsonify({"status": "error", "message": "No images saved for this registration."}), 400)
     return True, None
 
 def insert_or_update_student(roll_number, name, is_existing_student):
@@ -804,7 +804,7 @@ def insert_or_update_student(roll_number, name, is_existing_student):
                 if conn: conn.rollback()
                 cleanup_registration_session()
                 print(f"Concurrency error: Roll number {roll_number} found during finalization insert.")
-                return False, jsonify({"status": "error", "message": f"Roll Number {roll_number} already exists."}), 500
+                return False, (jsonify({"status": "error", "message": f"Roll Number {roll_number} already exists."}), 500)
             cursor.execute("INSERT INTO students (roll_number, name) VALUES (?, ?)", (roll_number, name))
             conn.commit()
             print(f"Successfully inserted student {roll_number}.")
@@ -819,7 +819,7 @@ def insert_or_update_student(roll_number, name, is_existing_student):
         flash(f"Database error occurred during student save: {db_err}", "danger")
         if conn: conn.rollback()
         cleanup_registration_session()
-        return False, jsonify({"status": "error", "message": "Database error saving student data."}), 500
+        return False, (jsonify({"status": "error", "message": "Database error saving student data."}), 500)
     finally:
         if conn: conn.close()
 
