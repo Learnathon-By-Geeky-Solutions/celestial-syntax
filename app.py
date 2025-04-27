@@ -858,316 +858,284 @@ def cleanup_registration_session():
     session.pop('is_existing_student', None)
 
 
+# Add these helper functions before the reports() route
+
+def _get_filter_dates(selected_semester):
+    """Determines start and end dates based on the selected semester."""
+    start_date, end_date = None, None
+    if selected_semester != 'all' and selected_semester in SEMESTER_DATES:
+        start_date, end_date = SEMESTER_DATES[selected_semester]
+        print(f"Applying semester filter: {start_date} to {end_date}")
+    else:
+        print("No semester filter applied.")
+    return start_date, end_date
+
+def _build_date_filter_sql(start_date, end_date):
+    """Builds the WHERE clause and parameters for date filtering."""
+    date_filter_sql = ""
+    query_params = []
+    if start_date and end_date:
+        date_filter_sql = " WHERE a.date BETWEEN ? AND ? "
+        query_params = [start_date, end_date]
+    return date_filter_sql, query_params
+
+def _fetch_all_courses_for_report(cursor):
+    """Fetches all courses for the report dropdown."""
+    try:
+        cursor.execute("SELECT id, name FROM courses ORDER BY name")
+        courses = cursor.fetchall()
+        print(f"Fetched {len(courses)} courses for reports.")
+        return courses
+    except sqlite3.Error as e:
+        print(f"Database error fetching courses for report: {e}", file=sys.stderr)
+        return [] # Return empty list on error
+
+def _calculate_overall_attendance(cursor, date_filter_sql, query_params):
+    """Calculates the overall attendance percentage within the filtered dates."""
+    overall_sql = f"SELECT SUM(present), COUNT(*) FROM attendance a {date_filter_sql.replace(' WHERE', 'WHERE') if date_filter_sql else ''}"
+    print(f"Executing overall SQL: {overall_sql} with params {query_params}")
+    cursor.execute(overall_sql, query_params)
+    overall_res = cursor.fetchone()
+    overall_present = overall_res[0] if overall_res and overall_res[0] is not None else 0
+    overall_total = overall_res[1] if overall_res and overall_res[1] is not None else 0
+    percentage = (overall_present / overall_total) * 100 if overall_total > 0 else 0
+    print(f"Overall filtered attendance: {overall_present}/{overall_total} ({round(percentage, 2)}%)")
+    return round(percentage, 1)
+
+def _calculate_course_stats(cursor, date_filter_sql, query_params):
+    """Calculates attendance statistics for each course within the filtered dates."""
+    course_sql = f"""
+        SELECT
+            c.id, c.name, SUM(a.present) AS total_present, COUNT(a.id) AS total_records
+        FROM attendance a
+        JOIN courses c ON a.course_id = c.id
+        {date_filter_sql.replace(' WHERE', 'WHERE') if date_filter_sql else ''}
+        GROUP BY c.id, c.name
+        ORDER BY c.name
+    """
+    print(f"Executing course stats SQL: {course_sql} with params {query_params}")
+    cursor.execute(course_sql, query_params)
+    course_stats_raw = cursor.fetchall()
+    course_stats = []
+    for row in course_stats_raw:
+        total_present = row['total_present'] if row['total_present'] is not None else 0
+        total_records = row['total_records'] if row['total_records'] is not None else 0
+        percentage = (total_present / total_records) * 100 if total_records > 0 else 0
+        course_stats.append({
+            'id': row['id'], 'name': row['name'], 'percentage': round(percentage, 2),
+            'present': total_present, 'total': total_records
+        })
+    print(f"Fetched {len(course_stats)} course stats.")
+    return course_stats
+
+def _calculate_attendance_trend(cursor, date_filter_sql, query_params):
+    """Calculates the monthly attendance trend within the filtered dates."""
+    trend_sql = f"""
+        SELECT strftime('%Y-%m', date) AS month, SUM(present) AS monthly_present, COUNT(id) AS monthly_total
+        FROM attendance a
+        {date_filter_sql.replace(' WHERE', 'WHERE') if date_filter_sql else ''}
+        GROUP BY month ORDER BY month
+    """
+    print(f"Executing trend SQL: {trend_sql} with params {query_params}")
+    cursor.execute(trend_sql, query_params)
+    trend_raw = cursor.fetchall()
+    attendance_trend = {'labels': [], 'percentages': [], 'present_counts': [], 'total_counts': []}
+    for row in trend_raw:
+        monthly_present = row['monthly_present'] or 0
+        monthly_total = row['monthly_total'] or 0
+        percentage = (monthly_present / monthly_total) * 100 if monthly_total > 0 else 0
+        attendance_trend['labels'].append(row['month'])
+        attendance_trend['percentages'].append(round(percentage, 2))
+        attendance_trend['present_counts'].append(monthly_present)
+        attendance_trend['total_counts'].append(monthly_total)
+    print("Fetched attendance trend data for reports.")
+    return attendance_trend
+
+def _validate_course_filter(cursor, selected_course_id):
+    """Validates the selected course ID and fetches its name."""
+    course_id_int = None
+    selected_course_name = ALL_COURSES_LABEL # Default
+    is_valid = False
+
+    if selected_course_id != 'all':
+        try:
+            course_id_int = int(selected_course_id)
+            cursor.execute(SELECT_COURSE_NAME_BY_ID_QUERY, (course_id_int,))
+            course_name_res = cursor.fetchone()
+            if course_name_res:
+                selected_course_name = course_name_res['name']
+                is_valid = True
+                print(f"Applying course filter: ID={course_id_int}, Name={selected_course_name}")
+            else:
+                flash(f"Invalid course ID ({selected_course_id}) provided for filtering.", "warning")
+                print(f"Invalid course ID {selected_course_id} provided for filtering low attendance.")
+        except ValueError:
+            flash(f"Invalid course ID format ('{selected_course_id}') provided.", "warning")
+            print(f"Invalid course ID format '{selected_course_id}' provided for filtering low attendance.")
+        except sqlite3.Error as e:
+             flash(f"Database error validating course ID: {e}", "danger")
+             print(f"DB error validating course ID {selected_course_id}: {e}", file=sys.stderr)
+    else:
+         is_valid = True # 'all' is always valid
+
+    # Return the integer ID only if valid and not 'all', otherwise None
+    return course_id_int if is_valid and selected_course_id != 'all' else None, selected_course_name, is_valid
+
+
+def _calculate_low_attendance_students(cursor, start_date, end_date, valid_course_id_int, low_threshold):
+    """Calculates the list of students below the low attendance threshold, applying filters."""
+    where_clauses = []
+    query_params = []
+
+    if start_date and end_date:
+        where_clauses.append("a.date BETWEEN ? AND ?")
+        query_params.extend([start_date, end_date])
+
+    if valid_course_id_int is not None: # Use the validated integer ID
+        where_clauses.append("a.course_id = ?")
+        query_params.append(valid_course_id_int)
+
+    where_sql = ""
+    if where_clauses:
+        where_sql = " WHERE " + " AND ".join(where_clauses)
+
+    low_attendance_sql = f"""
+        SELECT
+            s.id, s.roll_number, s.name,
+            SUM(CASE WHEN a.present = 1 THEN 1 ELSE 0 END) AS student_present_period,
+            COUNT(a.id) AS student_total_period
+        FROM students s
+        JOIN attendance a ON s.id = a.student_id
+        {where_sql}
+        GROUP BY s.id, s.roll_number, s.name
+        HAVING COUNT(a.id) > 0
+    """
+    print(f"Executing low attendance SQL: {low_attendance_sql} with params {query_params}")
+    cursor.execute(low_attendance_sql, query_params)
+    period_student_stats = cursor.fetchall()
+
+    low_attendance_students = []
+    for student in period_student_stats:
+        student_present = student['student_present_period'] or 0
+        student_total = student['student_total_period'] or 0
+        percentage = (student_present / student_total) * 100 if student_total > 0 else 0
+        if percentage < low_threshold:
+            low_attendance_students.append({
+                'roll_number': student['roll_number'], 'name': student['name'],
+                'percentage': round(percentage, 2),
+                'present': student_present, 'total': student_total
+            })
+
+    low_attendance_students.sort(key=lambda x: x['percentage'])
+    print(f"Found {len(low_attendance_students)} students below {low_threshold}% attendance.")
+    return low_attendance_students
+
+def _format_date_range_display(start_date, end_date):
+    """Formats the date range string for display."""
+    if start_date and end_date:
+        try:
+            # Attempt to parse and reformat dates to DD-MM-YYYY
+            start_dt = datetime.datetime.strptime(start_date, '%Y-%m-%d')
+            end_dt = datetime.datetime.strptime(end_date, '%Y-%m-%d')
+            start_display = start_dt.strftime('%d-%m-%Y')
+            end_display = end_dt.strftime('%d-%m-%Y')
+            return f"({start_display} to {end_display})"
+        except ValueError:
+            # Fallback if parsing fails (shouldn't happen with YYYY-MM-DD)
+             return f"({start_date} to {end_date})" # Show original format
+    return "(All Time)"
+
+
 # --- UPDATED Reporting and Analytics Route ---
 @app.route('/reports')
 @login_required # Protect the reports page
 def reports():
-    low_threshold = 60  # Example threshold percentage (Can be made configurable)
+    low_threshold = 60  # Example threshold percentage
     print("--- Hit /reports route ---")
-    conn = get_db()
-    cursor = conn.cursor()
-
-    # Get selected semester and course from query parameters
-    selected_semester = request.args.get('semester', 'all')
-    selected_course_id = request.args.get('course_id', 'all') # Get selected course ID
-    print(f"Reports filter: semester={selected_semester}, course_id={selected_course_id}")
-
-
-    # --- Initialize selected_course_name for display ---
+    conn = None
+    all_courses = []
+    overall_percentage = 0
+    course_stats = []
+    attendance_trend = {'labels': [], 'percentages': [], 'present_counts': [], 'total_counts': []}
+    low_attendance_students = []
+    error_message = None
     selected_course_name = ALL_COURSES_LABEL
+    is_course_filter_valid = False
+    date_range_display = ""
+
+    # Get filters from request arguments
+    selected_semester = request.args.get('semester', 'all')
+    # Use str() to handle None or numeric course_id safely
+    selected_course_id_str = str(request.args.get('course_id', 'all'))
+    print(f"Reports filter: semester={selected_semester}, course_id='{selected_course_id_str}'")
 
     try:
-        # Fetch list of all courses for the course dropdown
-        cursor.execute("SELECT id, name FROM courses ORDER BY name")
-        all_courses = cursor.fetchall()
-        print(f"Fetched {len(all_courses)} courses for reports.")
+        conn = get_db()
+        cursor = conn.cursor()
 
-        # Determine date range based on selected semester
-        start_date = None
-        end_date = None
-        date_filter_sql_overall_trend = ""
-        semester_query_params = []
+        # Fetch data common to all reports
+        all_courses = _fetch_all_courses_for_report(cursor)
 
-        if selected_semester != 'all' and selected_semester in SEMESTER_DATES:
-            start_date, end_date = SEMESTER_DATES[selected_semester]
-            date_filter_sql_overall_trend = " WHERE a.date BETWEEN ? AND ? "
-            semester_query_params = [start_date, end_date]
-            print(f"Applying semester filter: {start_date} to {end_date}")
+        # Determine date range based on semester
+        start_date, end_date = _get_filter_dates(selected_semester)
+        date_filter_sql, date_query_params = _build_date_filter_sql(start_date, end_date)
+
+        # Calculate report sections using helpers
+        overall_percentage = _calculate_overall_attendance(cursor, date_filter_sql, date_query_params)
+        course_stats = _calculate_course_stats(cursor, date_filter_sql, date_query_params)
+        attendance_trend = _calculate_attendance_trend(cursor, date_filter_sql, date_query_params)
+
+        # Validate the course filter specifically for the low attendance list
+        # This keeps the validation logic close to where it's needed
+        valid_course_id_int, selected_course_name, is_course_filter_valid = _validate_course_filter(cursor, selected_course_id_str)
+
+        # Only calculate low attendance if the course filter was valid (either 'all' or a real course ID)
+        if is_course_filter_valid:
+             low_attendance_students = _calculate_low_attendance_students(
+                 cursor, start_date, end_date, valid_course_id_int, low_threshold
+             )
         else:
-            selected_semester = 'all' # Ensure 'all' is the value if invalid or default
-            print("No semester filter applied.")
+             # If course filter was invalid, don't attempt calculation, maybe add a note
+             print("Skipping low attendance calculation due to invalid course filter.")
+             # Flash message is handled within _validate_course_filter
 
-        # --- Overall Attendance Percentage (All Time or Semester) ---
-        overall_sql = f"SELECT SUM(present), COUNT(*) FROM attendance a {date_filter_sql_overall_trend.replace(' WHERE', 'WHERE') if date_filter_sql_overall_trend else ''}"
-        print(f"Executing overall SQL: {overall_sql} with params {semester_query_params}")
-        cursor.execute(overall_sql, semester_query_params)
-        overall_res = cursor.fetchone()
-        overall_present = overall_res[0] if overall_res and overall_res[0] is not None else 0
-        overall_total = overall_res[1] if overall_res and overall_res[1] is not None else 0
-        overall_percentage = (overall_present / overall_total) * 100 if overall_total > 0 else 0
-        print(f"Overall filtered attendance: {overall_present}/{overall_total} ({round(overall_percentage, 2)}%)")
+        # Format date range for display
+        date_range_display = _format_date_range_display(start_date, end_date)
 
+        # --- IMPORTANT: Remove the duplicated low attendance block that was here ---
+        # The logic from lines ~1007 to ~1056 in the original file should be deleted.
 
-        # --- Attendance Percentage Per Course (Filtered by semester/time) ---
-        course_sql = f"""
-            SELECT
-                c.id,
-                c.name,
-                SUM(a.present) AS total_present,
-                COUNT(a.id) AS total_records
-            FROM attendance a
-            JOIN courses c ON a.course_id = c.id
-            {date_filter_sql_overall_trend.replace(' WHERE', 'WHERE') if date_filter_sql_overall_trend else ''}
-            GROUP BY c.id, c.name
-            ORDER BY c.name
-        """
-        print(f"Executing course stats SQL: {course_sql} with params {semester_query_params}")
-        cursor.execute(course_sql, semester_query_params)
-        course_stats_raw = cursor.fetchall()
-        course_stats = []
-        for row in course_stats_raw:
-            total_present = row['total_present'] if row['total_present'] is not None else 0
-            total_records = row['total_records'] if row['total_records'] is not None else 0
-            percentage = (total_present / total_records) * 100 if total_records > 0 else 0
-            course_stats.append({
-                'id': row['id'],
-                'name': row['name'],
-                'percentage': round(percentage, 2),
-                'present': total_present,
-                'total': total_records
-            })
-        print(f"Fetched {len(course_stats)} course stats.")
-
-        # --- Attendance Trend Over Time (by Month) - Filters by semester/time ---
-        trend_sql = f"""
-            SELECT
-                strftime('%Y-%m', date) AS month,
-                SUM(present) AS monthly_present,
-                COUNT(id) AS monthly_total
-            FROM attendance a
-            {date_filter_sql_overall_trend.replace(' WHERE', 'WHERE') if date_filter_sql_overall_trend else ''}
-            GROUP BY month
-            ORDER BY month
-        """
-        print(f"Executing trend SQL: {trend_sql} with params {semester_query_params}")
-        cursor.execute(trend_sql, semester_query_params)
-        trend_raw = cursor.fetchall()
-        attendance_trend = {
-            'labels': [row['month'] for row in trend_raw],
-            'percentages': [],
-            'present_counts': [row['monthly_present'] or 0 for row in trend_raw],
-            'total_counts': [row['monthly_total'] or 0 for row in trend_raw]
-        }
-        for row in trend_raw:
-            monthly_present = row['monthly_present'] or 0
-            monthly_total = row['monthly_total'] or 0
-            percentage = (monthly_present / monthly_total) * 100 if monthly_total > 0 else 0
-            attendance_trend['percentages'].append(round(percentage, 2))
-        print("Fetched attendance trend data for reports.")
-
-        # --- Query for Students with Low Attendance (filters by semester AND optionally course) ---
-        low_attendance_where_clauses = []
-        low_attendance_query_params = []
-        if selected_semester != 'all' and start_date and end_date:
-            low_attendance_where_clauses.append("a.date BETWEEN ? AND ?")
-            low_attendance_query_params.extend([start_date, end_date])
-        if selected_course_id != 'all':
-            try:
-                course_id_int = int(selected_course_id)
-                cursor.execute(SELECT_COURSE_NAME_BY_ID_QUERY, (course_id_int,))
-                course_name_res = cursor.fetchone()
-                if course_name_res:
-                    low_attendance_where_clauses.append("a.course_id = ?")
-                    low_attendance_query_params.append(course_id_int)
-                    selected_course_name = course_name_res['name']
-                    print(f"Applying course filter: ID={course_id_int}, Name={selected_course_name}")
-                else:
-                    selected_course_id = 'all'
-                    selected_course_name = ALL_COURSES_LABEL
-                    flash("Invalid course ID provided in parameters for filtering.", "warning")
-                    print(f"Invalid course ID {selected_course_id} provided for filtering low attendance.")
-            except ValueError:
-                selected_course_id = 'all'
-                selected_course_name = ALL_COURSES_LABEL
-                flash("Invalid course ID format provided in parameters.", "warning")
-                print(f"Invalid course ID format '{selected_course_id}' provided for filtering low attendance.")
-        low_attendance_where_sql = ""
-        if low_attendance_where_clauses:
-            low_attendance_where_sql = " WHERE " + " AND ".join(low_attendance_where_clauses)
-        low_attendance_sql = f"""
-            SELECT
-                s.id,
-                s.roll_number,
-                s.name,
-                SUM(CASE WHEN a.present = 1 THEN 1 ELSE 0 END) AS student_present_period,
-                COUNT(a.id) AS student_total_period
-            FROM students s
-            JOIN attendance a ON s.id = a.student_id
-            {low_attendance_where_sql}
-            GROUP BY s.id, s.roll_number, s.name
-            HAVING COUNT(a.id) > 0
-        """
-        print(f"Executing low attendance SQL: {low_attendance_sql} with params {low_attendance_query_params}")
-        cursor.execute(low_attendance_sql, low_attendance_query_params)
-        period_student_stats = cursor.fetchall()
-        low_attendance_students = []
-        for student in period_student_stats:
-            student_present = student['student_present_period'] or 0
-            student_total = student['student_total_period'] or 0
-            percentage = (student_present / student_total) * 100 if student_total > 0 else 0
-            if percentage < low_threshold:
-                low_attendance_students.append({
-                    'roll_number': student['roll_number'],
-                    'name': student['name'],
-                    'percentage': round(percentage, 2),
-                    'present': student_present,
-                    'total': student_total
-                })
-        low_attendance_students.sort(key=lambda x: x['percentage'])
-        print(f"Found {len(low_attendance_students)} students below {low_threshold}% attendance.")
-
-        # --- Render the reports page as usual ---
-        return render_template(REPORTS_TEMPLATE,
-                              all_courses=all_courses,
-                              semesters=SEMESTER_DATES.keys(),
-                              selected_semester=selected_semester,
-                              selected_course_id=selected_course_id,
-                              selected_course_name=selected_course_name,
-                              start_date=start_date,
-                              end_date=end_date,
-                              overall_percentage=round(overall_percentage, 1),
-                              course_stats=course_stats,
-                              attendance_trend=attendance_trend,
-                              low_attendance_students=low_attendance_students,
-                              low_threshold=low_threshold)
+    except sqlite3.Error as e:
+        print(f"Database error in /reports route: {e}", file=sys.stderr)
+        error_message = f"A database error occurred: {e}"
+        flash(error_message, "danger")
     except Exception as e:
-        print(f"Error in /reports route: {e}", file=sys.stderr)
-        # Render a user-friendly error page but with status 200 (for test compliance)
-        error_message = str(e)
-        low_attendance_students = []
-        return render_template(REPORTS_TEMPLATE,
-                              all_courses=[],
-                              semesters=SEMESTER_DATES.keys(),
-                              selected_semester='all',
-                              selected_course_id='all',
-                              selected_course_name='All Courses',
-                              start_date=None,
-                              end_date=None,
-                              overall_percentage=0,
-                              course_stats=[],
-                              attendance_trend={'labels': [], 'percentages': [], 'present_counts': [], 'total_counts': []},
-                              low_attendance_students=low_attendance_students,
-                              low_threshold=low_threshold,
-                              error_message=error_message)
-
-
-
-
-        low_attendance_where_clauses = []
-        low_attendance_query_params = []
-
-        # Add semester filter clauses if selected
-        if selected_semester != 'all' and start_date and end_date:
-             low_attendance_where_clauses.append("a.date BETWEEN ? AND ?")
-             low_attendance_query_params.extend([start_date, end_date])
-
-        # Add course filter clause if selected
-        if selected_course_id != 'all':
-             try:
-                 course_id_int = int(selected_course_id)
-                 # Check if the course_id actually exists
-                 cursor.execute(SELECT_COURSE_NAME_BY_ID_QUERY, (course_id_int,))
-                 course_name_res = cursor.fetchone()
-                 if course_name_res:
-                      low_attendance_where_clauses.append("a.course_id = ?")
-                      low_attendance_query_params.append(course_id_int)
-                      selected_course_name = course_name_res['name'] # Assign the actual name
-                      print(f"Applying course filter: ID={course_id_int}, Name={selected_course_name}")
-                 else:
-                      # Handle case where invalid course_id was passed in URL params
-                      selected_course_id = 'all' # Reset to 'all'
-                      selected_course_name = ALL_COURSES_LABEL # Reset display name
-                      flash("Invalid course ID provided in parameters for filtering.", "warning")
-                      print(f"Invalid course ID {selected_course_id} provided for filtering low attendance.")
-
-             except ValueError:
-                 # Handle case where course_id param is not a valid integer and not 'all'
-                 selected_course_id = 'all' # Reset to 'all'
-                 selected_course_name = ALL_COURSES_LABEL # Reset display name
-                 flash("Invalid course ID format provided in parameters.", "warning")
-                 print(f"Invalid course ID format '{selected_course_id}' provided for filtering low attendance.")
-
-
-        # Construct the WHERE clause for low attendance query
-        low_attendance_where_sql = ""
-        if low_attendance_where_clauses:
-            low_attendance_where_sql = " WHERE " + " AND ".join(low_attendance_where_clauses)
-
-
-        # Query for students with attendance records in the filtered period/course
-        # This query counts attendance *for the specific student in the specific filtered period/course*
-        low_attendance_sql = f"""
-            SELECT
-                s.id,
-                s.roll_number,
-                s.name,
-                SUM(CASE WHEN a.present = 1 THEN 1 ELSE 0 END) AS student_present_period,
-                COUNT(a.id) AS student_total_period -- Total records (present or absent) for student in period/course
-            FROM students s
-            JOIN attendance a ON s.id = a.student_id -- Use JOIN as we need attendance records within the filter
-            {low_attendance_where_sql}
-            GROUP BY s.id, s.roll_number, s.name
-            HAVING COUNT(a.id) > 0 -- Only include students who have AT LEAST ONE record in the filtered period/course
-        """
-        print(f"Executing low attendance SQL: {low_attendance_sql} with params {low_attendance_query_params}")
-
-        cursor.execute(low_attendance_sql, low_attendance_query_params)
-        period_student_stats = cursor.fetchall()
-        low_attendance_students = []
-
-        for student in period_student_stats:
-            student_present = student['student_present_period'] or 0
-            student_total = student['student_total_period'] or 0 # Guaranteed > 0 by HAVING clause
-            percentage = (student_present / student_total) * 100 if student_total > 0 else 0
-            # Only add students whose calculated percentage is below the threshold
-            if percentage < low_threshold:
-                 low_attendance_students.append({
-                    'roll_number': student['roll_number'],
-                    'name': student['name'],
-                    'percentage': round(percentage, 2),
-                    'present': student_present,
-                    'total': student_total # Total records for student in filter, not total classes held
-                 })
-        # Sort by percentage ascending
-        low_attendance_students.sort(key=lambda x: x['percentage'])
-        print(f"Found {len(low_attendance_students)} students below {low_threshold}% attendance.")
-
-
-    # Removed redundant except sqlite3.Error as e: block; exception is already handled by a previous except clause.
-
+        print(f"Unexpected error in /reports route: {e}", file=sys.stderr)
+        error_message = f"An unexpected error occurred: {e}"
+        flash(error_message, "danger")
+        # Consider re-raising or logging traceback here for deeper debugging if needed
+        # import traceback
+        # traceback.print_exc()
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
-    # Prepare dates for display if they were set
-    start_date_display = start_date.split('-')[2] + '-' + start_date.split('-')[1] + '-' + start_date.split('-')[0] if start_date else 'Start'
-    end_date_display = end_date.split('-')[2] + '-' + end_date.split('-')[1] + '-' + end_date.split('-')[0] if end_date else 'End'
-    date_range_display = f"({start_date_display} to {end_date_display})" if start_date else "(All Time)"
-
-
+    # Render the template with fetched/calculated data or defaults in case of error
     print("Rendering reports.html")
     return render_template(REPORTS_TEMPLATE,
-                           overall_percentage=round(overall_percentage, 2),
+                           overall_percentage=overall_percentage, # Already rounded in helper
                            course_stats=course_stats,
                            attendance_trend=attendance_trend,
                            low_attendance_students=low_attendance_students,
                            low_threshold=low_threshold,
-                           semesters=SEMESTER_DATES.keys(), # Pass semester keys for dropdown
-                           selected_semester=selected_semester, # Pass selected semester for form default
-                           all_courses=all_courses, # Pass list of all courses for dropdown
-                           selected_course_id=str(selected_course_id), # Pass selected course ID as string for form default
-                           selected_course_name=selected_course_name, # Pass selected course name for display
-                           date_range_display=date_range_display, # Pass formatted date range for display
-                           logged_in_username=session.get('username')) # Pass user info for display
+                           semesters=SEMESTER_DATES.keys(),
+                           selected_semester=selected_semester,
+                           all_courses=all_courses,
+                           selected_course_id=selected_course_id_str, # Pass the original string back for form default
+                           selected_course_name=selected_course_name if is_course_filter_valid else ALL_COURSES_LABEL, # Use validated name
+                           date_range_display=date_range_display,
+                           logged_in_username=session.get('username'),
+                           error_message=error_message) # Pass error message if any
 
 
 def render_student_lookup_page(courses_for_daily_lookup, overall_percentage, total_students,
