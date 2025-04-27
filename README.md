@@ -47,14 +47,10 @@ Make sure you have **Python 3.8+** installed on your system.
 ```bash
 git clone https://github.com/Learnathon-By-Geeky-Solutions/celestial-syntax/
 ```
-2. Install dependencies
-3. Start development
+2. Install dependencies : ``` pip install -r requirements.txt```
+3. Run the app: ``` python app.py```
 
-## Development Guidelines
-1. Create feature branches
-2. Make small, focused commits
-3. Write descriptive commit messages
-4. Create pull requests for review
+
 
 ## Resources
 - [Project Documentation](docs/)
