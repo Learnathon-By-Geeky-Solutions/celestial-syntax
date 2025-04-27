@@ -1397,4 +1397,4 @@ def fetch_attendance_counts(cursor, student_id, course_id, start_date, end_date)
 
 if __name__ == '__main__':
 
-    app.run(debug=True)
+    app.run()
