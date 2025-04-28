@@ -28,13 +28,6 @@
                         <a href="{{ url_for('register') }}" class="btn btn-secondary">
                             <i class="fas fa-user-plus me-2"></i>Register New Face
                         </a>
-                        <form action="{{ url_for('stop_attendance') }}" method="POST" class="d-grid">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button type="submit" class="btn btn-outline-danger">
-                                <i class="fas fa-stop me-2"></i>Stop Session
-                            </button>
-                        </form>
                     </div>
                 </div>
             </div>

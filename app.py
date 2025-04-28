@@ -375,117 +375,6 @@ def render_attendance_error(selected_date, courses, overall_percentage, total_st
 
 
 
-@app.route('/take_attendance', methods=['GET', 'POST'])
-@login_required # Protect the take attendance page
-def take_attendance():
-    print("--- Hit /take_attendance route ---")
-    global facial_recognition_process
-    if request.method == 'GET':
-        # Fetch all courses to display in the dropdown
-        conn = get_db()
-        cursor = conn.cursor()
-        try:
-            cursor.execute(SELECT_COURSES_QUERY)
-            courses = cursor.fetchall()
-            print(f"Fetched {len(courses)} courses for take attendance page.")
-        except sqlite3.Error as e:
-            print(f"Database error fetching courses for take attendance: {e}", file=sys.stderr)
-            courses = []
-        finally:
-             conn.close()
-        return render_template('take_attendance.html', courses=courses, logged_in_username=session.get('username')) # Pass username
-
-    elif request.method == 'POST':
-        # Get the selected course ID
-        course_id = request.form.get('course_id')
-        print(f"Received course_id {course_id} for starting attendance.")
-        # Validate course_id: must be a positive integer
-        if not course_id or not str(course_id).isdigit() or int(course_id) <= 0:
-            flash("Invalid course ID provided.", "warning")
-            print("Invalid course ID, redirecting to take_attendance.")
-            return redirect(url_for('take_attendance'))
-
-        # Check if a facial recognition process is already running
-        if facial_recognition_process and facial_recognition_process.poll() is None:
-            flash("Facial recognition is already running. Please stop it first.", "warning")
-            print("Process already running, flashing warning.")
-            return redirect(url_for('take_attendance')) # Redirect back to the form
-
-        # Run the facial recognition script with the selected course ID
-        try:
-            # Ensure the path to python and the script are correct
-            python_executable = sys.executable # Use the same python that runs Flask
-            script_path = os.path.join(os.path.dirname(__file__), 'attendance_taker.py')
-            print(f"Checking for script at: {script_path}")
-            if not os.path.exists(script_path):
-                 flash(f"Error: attendance_taker.py not found at {script_path}", "danger")
-                 print("Error: attendance_taker.py not found.", file=sys.stderr)
-                 return redirect(url_for('take_attendance'))
-
-            print(f"Starting facial recognition for course ID: {course_id} using {python_executable} {script_path}")
-            # Pass course_id as a command-line argument
-            # Add cwd=os.path.dirname(__file__) to ensure the script runs from the expected directory
-            facial_recognition_process = subprocess.Popen([python_executable, script_path, str(course_id)], cwd=os.path.dirname(__file__))
-            print(f"Facial recognition process started with PID: {facial_recognition_process.pid}")
-            flash(f"Facial recognition started for course ID {course_id}.", "success")
-            return redirect(url_for('index'))  # Redirect to home page (dashboard)
-
-        except Exception as e:
-            flash(f"Error running facial recognition system: {str(e)}", "danger")
-            print(f"Error details running attendance_taker: {e}", file=sys.stderr) # Log the error for debugging
-            return redirect(url_for('take_attendance'))
-
-
-@app.route('/stop_attendance', methods=['POST'])
-@login_required # Protect the stop attendance action
-def stop_attendance():
-    print("--- Hit /stop_attendance route ---")
-    global facial_recognition_process
-    if facial_recognition_process and facial_recognition_process.poll() is None:
-        # Terminate the facial recognition process
-        try:
-            print(f"Attempting to terminate facial recognition process (PID: {facial_recognition_process.pid})...")
-            # Send SIGTERM first for graceful shutdown
-            facial_recognition_process.terminate()
-            # Wait a bit for it to terminate
-            try:
-                return_code = facial_recognition_process.wait(timeout=5)
-                print(f"Process terminated successfully with return code: {return_code}")
-            except subprocess.TimeoutExpired:
-                print("Process did not terminate gracefully within 5s, attempting to kill.")
-                # If it doesn't terminate, try killing it (SIGKILL)
-                try:
-                    if facial_recognition_process and facial_recognition_process.poll() is None: # Check if it's still running
-                        facial_recognition_process.kill()
-                        return_code = facial_recognition_process.wait() # Wait for kill to complete
-                        print(f"Process killed successfully with return code: {return_code}")
-                    else:
-                         print("Process was already terminated before kill attempt.")
-                except Exception as kill_e:
-                     print(f"Error during kill: {kill_e}", file=sys.stderr)
-                     flash(f"Process kill failed: {str(kill_e)}", "danger")
-                finally:
-                     flash("Facial recognition process was killed.", "warning") # Indicate less graceful stop
-
-            facial_recognition_process = None # Reset the variable after wait/kill
-
-            # Add a small delay to ensure resources are released
-            # import time
-            # time.sleep(1) # Optional delay
-
-            flash("Facial recognition stopped successfully.", "success")
-
-        except Exception as e:
-            # Catch any other errors during termination attempt
-            flash(f"Error stopping facial recognition: {str(e)}", "danger")
-            print(f"Error stopping process: {e}", file=sys.stderr)
-            facial_recognition_process = None # Ensure variable is reset even on error
-    else:
-        print("No process running to stop.")
-        flash("No facial recognition process is currently running.", "info")
-    return redirect(url_for('index'))
-
-
 # --- Face Registration Routes ---
 # These routes should also be protected as only teachers should register faces
 @app.route('/register')
@@ -1394,6 +1283,115 @@ def fetch_attendance_counts(cursor, student_id, course_id, start_date, end_date)
 
     return total_classes_held, total_present, total_absent
 
+
+@app.route('/take_attendance', methods=['GET'])
+@login_required
+def take_attendance():
+    # Fetch all courses to display in the dropdown
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    try:
+        cursor.execute(SELECT_COURSES_QUERY)
+        courses = cursor.fetchall()
+    except sqlite3.Error as e:
+        print(f"Database error fetching courses for take attendance: {e}", file=sys.stderr)
+        courses = []
+    finally:
+        conn.close()
+    return render_template('take_attendance.html', courses=courses, logged_in_username=session.get('username'))
+
+# --- API endpoint for browser-based face recognition ---
+from io import BytesIO
+from PIL import Image
+import re
+
+@app.route('/api/recognize_face', methods=['POST'])
+@login_required
+@csrf.exempt
+def api_recognize_face():
+    data = request.get_json()
+    img_data = data.get('image')
+    course_id = data.get('course_id')
+    if not img_data or not course_id:
+        return jsonify({'status': 'error', 'message': 'Missing image or course_id'}), 400
+    # Parse base64 image
+    img_str = re.sub('^data:image/.+;base64,', '', img_data)
+    try:
+        img_bytes = base64.b64decode(img_str)
+        img = Image.open(BytesIO(img_bytes)).convert('RGB')
+        img_np = np.array(img)
+        # Convert RGB to BGR for OpenCV
+        img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Invalid image data: {e}'}), 400
+
+    # --- Face recognition logic ---
+    # Use the Face_Recognizer class from attendance_taker.py, but just for a single image
+    try:
+        from attendance_taker import Face_Recognizer
+        recognizer = Face_Recognizer(course_id)
+        recognizer.get_face_database()
+        detector = recognizer.detector if hasattr(recognizer, 'detector') else None
+        if detector is None:
+            import dlib
+            detector = dlib.get_frontal_face_detector()
+        faces = detector(img_bgr, 1)
+        if len(faces) == 0:
+            return jsonify({'status': 'success', 'name': 'No face detected'}), 200
+        # Extract face features
+        predictor = recognizer.predictor if hasattr(recognizer, 'predictor') else None
+        face_reco_model = recognizer.face_reco_model if hasattr(recognizer, 'face_reco_model') else None
+        if predictor is None or face_reco_model is None:
+            import dlib
+            predictor = dlib.shape_predictor(r"data/data_dlib/shape_predictor_68_face_landmarks.dat")
+            face_reco_model = dlib.face_recognition_model_v1(r"data/data_dlib/dlib_face_recognition_resnet_model_v1.dat")
+        recognized_people = []
+        for face in faces:
+            shape = predictor(img_bgr, face)
+            features = face_reco_model.compute_face_descriptor(img_bgr, shape)
+            # Compare with known features
+            min_dist = float('inf')
+            min_idx = -1
+            for i, feat_known in enumerate(recognizer.face_features_known_list):
+                dist = recognizer.return_euclidean_distance(features, feat_known)
+                if dist < min_dist:
+                    min_dist = dist
+                    min_idx = i
+            if min_dist < 0.4 and min_idx >= 0:
+                roll = recognizer.face_roll_number_known_list[min_idx]
+                name = recognizer.face_name_known_list[min_idx]
+                recognized_people.append({'name': name, 'roll': roll})
+                # Mark attendance in DB for this student, course, today
+                try:
+                    conn = sqlite3.connect(DB_NAME)
+                    cursor = conn.cursor()
+                    today = datetime.datetime.now().strftime('%Y-%m-%d')
+                    # Get student_id from roll
+                    cursor.execute("SELECT id FROM students WHERE roll_number = ?", (roll,))
+                    student = cursor.fetchone()
+                    if student:
+                        student_id = student[0]
+                        # Update attendance record to present=1
+                        cursor.execute("""
+                            UPDATE attendance SET present=1 WHERE student_id=? AND course_id=? AND date=?
+                        """, (student_id, course_id, today))
+                        if cursor.rowcount == 0:
+                            # No row updated, so insert new
+                            cursor.execute("""
+                                INSERT INTO attendance (student_id, course_id, date, present) VALUES (?, ?, ?, 1)
+                            """, (student_id, course_id, today))
+                        conn.commit()
+                    conn.close()
+                except Exception as db_e:
+                    print(f"[ERROR] Attendance DB update: {db_e}")
+            else:
+                recognized_people.append({'name': 'Unknown', 'roll': '-'})
+        if recognized_people:
+            return jsonify({'status': 'success', 'recognized': recognized_people})
+        else:
+            return jsonify({'status': 'success', 'recognized': []})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Recognition error: {e}'}), 500
 
 if __name__ == '__main__':
 

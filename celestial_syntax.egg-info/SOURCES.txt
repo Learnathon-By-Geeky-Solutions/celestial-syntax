@@ -1,6 +1,0 @@
-README.md
-setup.py
-celestial_syntax.egg-info/PKG-INFO
-celestial_syntax.egg-info/SOURCES.txt
-celestial_syntax.egg-info/dependency_links.txt
-celestial_syntax.egg-info/top_level.txt

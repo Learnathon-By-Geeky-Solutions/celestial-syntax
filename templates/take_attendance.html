@@ -3,30 +3,48 @@
 {% block title %}Take Attendance - Smart Attendance{% endblock %}
 
 {% block content %}
-    <div class="row justify-content-center">
-        <div class="col-md-8">
-            <div class="card">
-                <div class="card-header bg-primary text-white">
-                    <h3 class="mb-0"><i class="fas fa-camera me-2"></i>Facial Recognition Setup</h3>
-                </div>
-                <div class="card-body text-center">
-                    <div class="mb-4">
-                        <i class="fas fa-video fa-4x text-primary mb-3"></i>
-                        <h4>Select Course for Attendance</h4>
-                    </div>
-                    <form action="/take_attendance" method="POST">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <select name="course_id" class="form-select form-select-lg mb-4">
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h3 class="mb-0"><i class="fas fa-camera me-2"></i>Take Attendance (Webcam)</h3>
+            </div>
+            <div class="card-body text-center">
+                <form id="attendance-form" onsubmit="return false;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="mb-3">
+                        <label for="attendance-course-id" class="form-label">Select Course</label>
+                        <select id="attendance-course-id" name="course_id" class="form-select form-select-lg mb-3">
                             {% for course in courses %}
                             <option value="{{ course[0] }}">{{ course[1] }}</option>
                             {% endfor %}
                         </select>
-                        <button type="submit" class="btn btn-primary btn-lg w-100">
-                            <i class="fas fa-play-circle me-2"></i>Start Recognition
-                        </button>
-                    </form>
+                    </div>
+                    <div class="mb-3">
+                        <video id="attendance-video" width="100%" height="320" autoplay muted style="border-radius:8px; background:#222;"></video>
+                    </div>
+                    <div class="mb-3">
+                        <button type="button" class="btn btn-info me-2" id="start-camera-btn"><i class="fas fa-video"></i> Start Camera</button>
+                        <button type="button" class="btn btn-danger me-2" id="stop-camera-btn"><i class="fas fa-stop"></i> Stop Camera</button>
+                        <button type="button" class="btn btn-primary" id="snap-btn"><i class="fas fa-camera"></i> Take Attendance</button>
+                    </div>
+                    <div id="attendance-status" class="alert" role="alert" style="display:none;"></div>
+                    <div class="mt-4">
+                        <h5>Recognized Name:</h5>
+                        <div id="recognized-name" style="font-size:1.5rem; font-weight:600; color:#2563eb;">-</div>
+                    </div>
+                </form>
+                <!-- Replace Stop Session form with a button that returns to dashboard -->
+                <div class="d-grid mt-4">
+                    <a href="{{ url_for('index') }}" class="btn btn-outline-danger btn-lg">
+                        <i class="fas fa-stop me-2"></i>Stop Session
+                    </a>
                 </div>
             </div>
         </div>
     </div>
+</div>
+{% endblock %}
+{% block head_content %}
+    <script src="{{ url_for('static', filename='attendance_camera.js') }}"></script>
 {% endblock %}
