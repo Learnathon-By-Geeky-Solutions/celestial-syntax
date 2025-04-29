@@ -507,129 +507,152 @@ def _set_registration_session(folder_path, roll_number, name, is_existing_studen
     session['is_existing_student'] = is_existing_student
     print(f"Session data set: current_folder={session['current_folder']}, roll_number={session['roll_number']}, name={session['name']}, is_existing_student={session['is_existing_student']}")
 
-@app.route('/capture_image', methods=['POST'])
-@login_required # Protect image capture
-def capture_image():
-    print("--- Hit /capture_image route ---")
-    # Ensure required session data exists
+# --- Helper Functions for Image Capture ---
+
+def _validate_capture_session():
+    """Validates registration session and folder existence."""
     if not registration_session_valid():
-        flash("Session expired or registration not started. Please start registration again.", "danger")
-        # Clear session data if it's incomplete/invalid
-        session.pop('current_folder', None)
-        session.pop('roll_number', None)
-        session.pop('name', None)
-        session.pop('is_existing_student', None)
-        print("Session data missing for capture_image.")
-        return jsonify({"status": "error", "message": "Session data missing for image capture."}), 400
+        flash("Session expired or registration not started...", "danger")
+        clear_registration_session() # Example: Clear potentially invalid session
+        return None, (jsonify({"status": "error", "message": "Session data missing."}), 400)
 
     folder_path = session['current_folder']
-
-
-
     if not os.path.isdir(folder_path):
-         flash(f"Registration folder {os.path.basename(folder_path)} not found on server. Please start registration again.", "danger")
+         flash(f"Registration folder {os.path.basename(folder_path)} not found...", "danger")
          clear_registration_session()
-         print(f"Registration folder not found: {folder_path}")
-         return jsonify({"status": "error", "message": "Registration folder not found."}), 404
+         return None, (jsonify({"status": "error", "message": "Registration folder not found."}), 404)
+    return folder_path, None # Return path if valid, None for error response
+
+def _decode_image_from_request(request_form):
+    """Decodes the base64 image data from the request."""
+    image_data = request_form.get('image_data')
+    if not image_data:
+        return None, "No image data received."
 
     try:
-        image_data = request.form.get('image_data')
-        if not image_data:
-            print("No image data received.")
-            return jsonify({"status": "error", "message": "No image data received."}), 400
-
         image_data_parts = image_data.split(",")
         if len(image_data_parts) != 2:
-             print("Invalid image data format.")
-             return jsonify({"status": "error", "message": "Invalid image data format."}), 400
-
+             return None, "Invalid image data format."
         image_binary = base64.b64decode(image_data_parts[1])
         nparr = np.frombuffer(image_binary, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
         if image is None:
-             print("Could not decode image from base64.")
-             return jsonify({"status": "error", "message": "Could not decode image."}), 400
+             return None, "Could not decode image."
+        return image, None # Return image array if successful
+    except Exception as e:
+        return None, f"Error decoding image: {str(e)}"
 
-        # Use absolute path for cascade file
-        # Check current directory first, then opencv data path
-        cascade_filename = 'haarcascade_frontalface_default.xml'
-        base_dir = os.path.dirname(__file__)
-        cascade_path = os.path.join(base_dir, cascade_filename)
+def _find_cascade_file():
+    """Finds the path to the Haar cascade file."""
+    cascade_filename = 'haarcascade_frontalface_default.xml'
+    base_dir = os.path.dirname(__file__)
+    cascade_path = os.path.join(base_dir, cascade_filename)
+    if not os.path.exists(cascade_path):
+         cascade_path = os.path.join(cv2.data.haarcascades, cascade_filename)
+         if not os.path.exists(cascade_path):
+             print(f"Haar cascade file not found...", file=sys.stderr)
+             return None
+    print(f"Using cascade file: {cascade_path}")
+    return cascade_path
 
-        if not os.path.exists(cascade_path):
-             # Fallback to opencv data path
-             cascade_path = os.path.join(cv2.data.haarcascades, cascade_filename)
-             if not os.path.exists(cascade_path):
-                print(f"Haar cascade file not found at {os.path.join(base_dir, cascade_filename)} or {os.path.join(cv2.data.haarcascades, cascade_filename)}", file=sys.stderr)
-                flash("Facial recognition cascade file not found on server.", "danger")
-                return jsonify({"status": "error", "message": "Facial recognition configuration error."}), 500
+def _detect_and_crop_face(image, cascade_path):
+    """Detects a single face, crops, and resizes it."""
+    face_cascade = cv2.CascadeClassifier(cascade_path)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=8, minSize=(40, 40))
 
-        print(f"Using cascade file: {cascade_path}")
-        face_cascade = cv2.CascadeClassifier(cascade_path)
+    if len(faces) == 0:
+        return None, "No face detected in the captured image."
+    if len(faces) > 1:
+        print(f"Warning: Multiple faces detected ({len(faces)}). Using the first.")
 
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        # Increase minNeighbors slightly to reduce false positives if needed, or adjust scaleFactor/minSize
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=8, minSize=(40, 40))
-        print(f"Detected {len(faces)} faces.")
+    x, y, w, h = faces[0]
+    padding = int(max(w, h) * 0.3)
+    x_start = max(0, x - padding)
+    y_start = max(0, y - padding)
+    x_end = min(image.shape[1], x + w + padding)
+    y_end = min(image.shape[0], y + h + padding)
+    face_roi = image[y_start:y_end, x_start:x_end]
 
-        if len(faces) == 0:
-            return jsonify({"status": "error", "message": "No face detected in the captured image. Please ensure your face is clearly visible and well-lit."}), 400
-        elif len(faces) > 1:
-            # Optionally, handle multiple faces - here we take the first and warn
-            print(f"Warning: Multiple faces detected ({len(faces)}). Using the first detected face.")
-            # flash("Multiple faces detected. Using the first one found.", "warning") # Optional: Flash a warning
+    if face_roi.size == 0:
+         return None, "Failed to crop face region (ROI empty)."
 
+    resized_face = cv2.resize(face_roi, (200, 200))
+    if resized_face.size == 0:
+        return None, "Failed to crop face region (resize failed)."
 
-        # Assuming only one face is relevant (or taking the first of multiple)
-        x, y, w, h = faces[0]
-        padding = int(max(w, h) * 0.3) # Add more padding around the face for robustness
-        x_start = max(0, x - padding)
-        y_start = max(0, y - padding)
-        x_end = min(image.shape[1], x + w + padding)
-        y_end = min(image.shape[0], y + h + padding)
-        face_roi = image[y_start:y_end, x_start:x_end]
-        print(f"Cropped face ROI: ({x_start},{y_start}) to ({x_end},{y_end})")
+    return resized_face, None
 
-        if face_roi.size == 0:
-             # This can happen if padding pushes the ROI coordinates outside the image boundaries
-             flash("Failed to crop face region. Please try capturing slightly away from the image edge.", "warning")
-             print("Cropped face ROI is empty.")
-             return jsonify({"status": "error", "message": "Failed to crop face region."}), 500
-
-
-        # Resize to the size expected by the recognition system (typically 200x200 or 160x160)
-        resized_face = cv2.resize(face_roi, (200, 200)) # Match size expected by feature extraction/recognition
-        print("Resized face to 200x200.")
-        # Additional check: If resize returns empty (can happen in edge cases or test mocks)
-        if resized_face.size == 0:
-            flash("Failed to crop face region. Please try capturing slightly away from the image edge.", "warning")
-            print("Cropped face ROI is empty after resize.")
-            return jsonify({"status": "error", "message": "Failed to crop face region."}), 500
-
-        # Count existing images to determine the next file name
+def _save_face_image(folder_path, face_image):
+    """Saves the face image to the specified folder."""
+    try:
         img_count = len([name for name in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, name))]) + 1
         image_path = os.path.join(folder_path, f"img_face_{img_count}.jpg")
         print(f"Saving image to: {image_path}")
-        save_success = cv2.imwrite(image_path, resized_face)
-
+        save_success = cv2.imwrite(image_path, face_image)
         if not save_success:
-             print(f"Failed to write image file to {image_path}", file=sys.stderr)
-             flash("Failed to save image file on the server. Check folder permissions.", "danger")
+             return -1, "Failed to save image file." # Return -1 for error count
+        return img_count, None
+    except Exception as e:
+        return -1, f"Error saving image: {str(e)}"
+
+
+# --- Refactored Route ---
+
+@app.route('/capture_image', methods=['POST'])
+@login_required
+def capture_image():
+    print("--- Hit /capture_image route ---")
+
+    # 1. Validate Session and Folder
+    folder_path, error_response = _validate_capture_session()
+    if error_response:
+        return error_response # Returns the jsonify response directly
+
+    # 2. Decode Image
+    image, error_msg = _decode_image_from_request(request.form)
+    if error_msg:
+        print(f"Image decode error: {error_msg}")
+        return jsonify({"status": "error", "message": error_msg}), 400
+
+    # 3. Load Cascade
+    cascade_path = _find_cascade_file()
+    if not cascade_path:
+        flash("Facial recognition cascade file not found on server.", "danger")
+        return jsonify({"status": "error", "message": "Facial recognition configuration error."}), 500
+
+    # --- Wrapped Face Processing in try/except ---
+    # This reduces nesting inside the main try block of the original function
+    try:
+        # 4. Detect and Crop Face
+        resized_face, error_msg = _detect_and_crop_face(image, cascade_path)
+        if error_msg:
+             # Use 400 for detection issues, 500 for cropping/resizing issues
+             status_code = 400 if "No face detected" in error_msg else 500
+             flash(error_msg, "warning" if status_code == 400 else "danger")
+             print(f"Face processing error: {error_msg}")
+             return jsonify({"status": "error", "message": error_msg}), status_code
+
+        # 5. Save Image
+        img_count, error_msg = _save_face_image(folder_path, resized_face)
+        if error_msg:
+             print(f"Image save error: {error_msg}", file=sys.stderr)
+             flash(f"Failed to save image: {error_msg}", "danger")
              return jsonify({"status": "error", "message": "Failed to save image file."}), 500
 
+        # 6. Return Success
         print(f"Image {img_count} saved successfully.")
-        print("DEBUG: Hit success return in /capture_image")
         return jsonify({
             "status": "success",
-            "message": f"Image {img_count} saved successfully! [COVERAGE-HIT]",
+            "message": f"Image {img_count} saved successfully!",
             "image_count": img_count
         }), 200
+
     except Exception as e:
-        print(f"Error in /capture_image: {e}", file=sys.stderr)
+        # Catch unexpected errors specifically during OpenCV processing or saving
+        print(f"Unexpected error during face processing/saving: {e}", file=sys.stderr)
         flash(f"An internal server error occurred during image capture: {str(e)}", "danger")
         return jsonify({"status": "error", "message": f"An internal server error occurred: {str(e)}"}), 500
-
 
 @app.route('/finalize_registration', methods=['POST'])
 @login_required
