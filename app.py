@@ -14,6 +14,8 @@ import sys
 import functools # Import functools for the login_required decorator
 import bcrypt # Import bcrypt for password hashing
 
+SELECT_ID_FROM_STUDENTS_BY_ROLL = "SELECT id FROM students WHERE roll_number = ?"
+
 from flask_wtf import CSRFProtect
 
 APPLICATION_JSON = 'application/json'
@@ -447,7 +449,7 @@ def _sanitize_inputs(name, roll_number):
 def _check_existing_student(roll_number):
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT id FROM students WHERE roll_number = ?", (roll_number,))
+    cursor.execute(SELECT_ID_FROM_STUDENTS_BY_ROLL, (roll_number,))
     existing_student_row = cursor.fetchone()
     conn.close()
     is_existing_student = existing_student_row is not None
@@ -687,7 +689,7 @@ def insert_or_update_student(roll_number, name, is_existing_student):
         cursor = conn.cursor()
         if not is_existing_student:
             print(f"Attempting to insert new student: {roll_number}, {name}")
-            cursor.execute("SELECT id FROM students WHERE roll_number = ?", (roll_number,))
+            cursor.execute(SELECT_ID_FROM_STUDENTS_BY_ROLL, (roll_number,))
             existing_student_check = cursor.fetchone()
             if existing_student_check:
                 flash(f"Roll Number {roll_number} already exists in the database.", "danger")
@@ -1314,33 +1316,51 @@ def api_recognize_face():
     course_id = data.get('course_id')
     if not img_data or not course_id:
         return jsonify({'status': 'error', 'message': 'Missing image or course_id'}), 400
-    # Parse base64 image
-    img_str = re.sub('^data:image/.+;base64,', '', img_data)
+    
+    img_bgr, err = parse_base64_image(img_data)
+    if err:
+        return jsonify({'status': 'error', 'message': f'Invalid image data: {err}'}), 400
+    
     try:
+        recognized_people, face_error = recognize_faces_and_mark_attendance(img_bgr, course_id)
+        if face_error:
+            return jsonify({'status': 'error', 'message': face_error}), 500
+        if not recognized_people:
+            return jsonify({'status': 'success', 'recognized': []})
+        return jsonify({'status': 'success', 'recognized': recognized_people})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Recognition error: {e}'}), 500
+
+
+def parse_base64_image(img_data):
+    import re, base64
+    from PIL import Image
+    from io import BytesIO
+    try:
+        img_str = re.sub('^data:image/.+;base64,', '', img_data)
         img_bytes = base64.b64decode(img_str)
         img = Image.open(BytesIO(img_bytes)).convert('RGB')
         img_np = np.array(img)
-        # Convert RGB to BGR for OpenCV
         img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+        return img_bgr, None
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Invalid image data: {e}'}), 400
+        return None, str(e)
 
-    # --- Face recognition logic ---
-    # Use the Face_Recognizer class from attendance_taker.py, but just for a single image
+
+def recognize_faces_and_mark_attendance(img_bgr, course_id):
     try:
         from attendance_taker import Face_Recognizer
         recognizer = Face_Recognizer(course_id)
         recognizer.get_face_database()
-        detector = recognizer.detector if hasattr(recognizer, 'detector') else None
+        detector = getattr(recognizer, 'detector', None)
         if detector is None:
             import dlib
             detector = dlib.get_frontal_face_detector()
         faces = detector(img_bgr, 1)
         if len(faces) == 0:
-            return jsonify({'status': 'success', 'name': 'No face detected'}), 200
-        # Extract face features
-        predictor = recognizer.predictor if hasattr(recognizer, 'predictor') else None
-        face_reco_model = recognizer.face_reco_model if hasattr(recognizer, 'face_reco_model') else None
+            return [], None
+        predictor = getattr(recognizer, 'predictor', None)
+        face_reco_model = getattr(recognizer, 'face_reco_model', None)
         if predictor is None or face_reco_model is None:
             import dlib
             predictor = dlib.shape_predictor(r"data/data_dlib/shape_predictor_68_face_landmarks.dat")
@@ -1349,50 +1369,43 @@ def api_recognize_face():
         for face in faces:
             shape = predictor(img_bgr, face)
             features = face_reco_model.compute_face_descriptor(img_bgr, shape)
-            # Compare with known features
-            min_dist = float('inf')
-            min_idx = -1
+            min_dist, min_idx = float('inf'), -1
             for i, feat_known in enumerate(recognizer.face_features_known_list):
                 dist = recognizer.return_euclidean_distance(features, feat_known)
                 if dist < min_dist:
-                    min_dist = dist
-                    min_idx = i
+                    min_dist, min_idx = dist, i
             if min_dist < 0.4 and min_idx >= 0:
                 roll = recognizer.face_roll_number_known_list[min_idx]
                 name = recognizer.face_name_known_list[min_idx]
                 recognized_people.append({'name': name, 'roll': roll})
-                # Mark attendance in DB for this student, course, today
-                try:
-                    conn = sqlite3.connect(DB_NAME)
-                    cursor = conn.cursor()
-                    today = datetime.datetime.now().strftime('%Y-%m-%d')
-                    # Get student_id from roll
-                    cursor.execute("SELECT id FROM students WHERE roll_number = ?", (roll,))
-                    student = cursor.fetchone()
-                    if student:
-                        student_id = student[0]
-                        # Update attendance record to present=1
-                        cursor.execute("""
-                            UPDATE attendance SET present=1 WHERE student_id=? AND course_id=? AND date=?
-                        """, (student_id, course_id, today))
-                        if cursor.rowcount == 0:
-                            # No row updated, so insert new
-                            cursor.execute("""
-                                INSERT INTO attendance (student_id, course_id, date, present) VALUES (?, ?, ?, 1)
-                            """, (student_id, course_id, today))
-                        conn.commit()
-                    conn.close()
-                except Exception as db_e:
-                    print(f"[ERROR] Attendance DB update: {db_e}")
+                mark_attendance_for_student(roll, course_id)
             else:
                 recognized_people.append({'name': 'Unknown', 'roll': '-'})
-        if recognized_people:
-            return jsonify({'status': 'success', 'recognized': recognized_people})
-        else:
-            return jsonify({'status': 'success', 'recognized': []})
+        return recognized_people, None
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Recognition error: {e}'}), 500
+        return [], str(e)
 
+
+def mark_attendance_for_student(roll, course_id):
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        today = datetime.datetime.now().strftime('%Y-%m-%d')
+        cursor.execute(SELECT_ID_FROM_STUDENTS_BY_ROLL, (roll,))
+        student = cursor.fetchone()
+        if student:
+            student_id = student[0]
+            cursor.execute("""
+                UPDATE attendance SET present=1 WHERE student_id=? AND course_id=? AND date=?
+            """, (student_id, course_id, today))
+            if cursor.rowcount == 0:
+                cursor.execute("""
+                    INSERT INTO attendance (student_id, course_id, date, present) VALUES (?, ?, ?, 1)
+                """, (student_id, course_id, today))
+            conn.commit()
+        conn.close()
+    except Exception as db_e:
+        print(f"[ERROR] Attendance DB update: {db_e}")
 if __name__ == '__main__':
 
     app.run()

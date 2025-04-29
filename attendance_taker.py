@@ -259,7 +259,7 @@ class Face_Recognizer:
         logging.debug("  scene 2.2  Get faces in this frame and do face recognition")
         self.current_frame_face_name_list = []
         self._extract_face_features_and_names(img_rd, faces)
-        self._recognize_faces_and_update_attendance(img_rd, faces)
+        self._recognize_faces_and_update_attendance(faces)
         self.draw_note(img_rd)
         return img_rd
 
@@ -270,7 +270,7 @@ class Face_Recognizer:
                 face_reco_model.compute_face_descriptor(img_rd, shape))
             self.current_frame_face_name_list.append("unknown")
 
-    def _recognize_faces_and_update_attendance(self, img_rd, faces):
+    def _recognize_faces_and_update_attendance(self, faces):
         for k in range(len(faces)):
             logging.debug("  For face %d in current frame:", k + 1)
             self.current_frame_face_centroid_list.append([
